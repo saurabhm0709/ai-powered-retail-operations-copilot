@@ -208,6 +208,7 @@ class Facts(BaseModel):
     order_context: Literal["academy","school","tournament","team","none"] = "none"
     repeated: bool = False          # "again", "repeated", "multiple complaints"
     multi_store: bool = False
+    pos_severity: Literal["outage","degraded","unknown"] = "unknown"  # runbook "cannot process" (P1) vs SOP "degraded" (P2)
     time_window_hours: int | None   # "last 24 hours" -> 24, "last 30 days" -> 720
 
 class TriageResult(BaseModel):     # LLM fills these via structured output (except sku/priority)
@@ -385,7 +386,8 @@ citation, matrix_trigger)`:
 | P1-SECURITY | P1 | input gate blocked (injection/restricted) | 05#prompt-injection | Restricted data, prompt injection, or suspicious request |
 | P1-PAYMENT-DATA | P1 | payment data request | 02#payment-security | Payment data or credential request |
 | P1-SAFETY | P1 | safety_signal ≠ none or finding `safety_incident` | 04#recall-and-safety, 01#priority-rules | Contamination, injury, recall, or unsafe equipment |
-| P1-POS-OUTAGE | P1 | POS and scope ∈ {multiple_registers, all_registers, one_store} | 02#pos-card-reader-runbook, 01#priority-rules | Multiple registers or store-wide payment outage |
+| P1-POS-OUTAGE | P1 | POS and scope ∈ {multiple_registers, all_registers, one_store} and pos_severity ∈ {outage, unknown} (unknown fails safe) | 02#pos-card-reader-runbook, 01#priority-rules | Multiple registers or store-wide payment outage |
+| P2-POS-DEGRADED | P2 | POS and scope ∈ {multiple_registers, all_registers, one_store} and pos_severity = degraded (slow / intermittent, still processing) | 01#priority-rules, 02#pos-card-reader-runbook | Multiple registers or store-wide payment outage (matrix has no P2 POS row; team/SLA from this row) |
 | P2-STOCKOUT | P2 | finding `stockout_high_demand` or (stockout and order_context ≠ none) or `warehouse_depleted` | 03#stock-outs-and-replenishment | High-demand SKU stock-out… / Warehouse stock depleted… |
 | P2-SHORT-SHIPMENT | P2 | finding `short_shipment` (<90%) on high-demand item, or `consecutive_short_shipment` | 04#short-shipments | Repeated or below-90-percent short shipment |
 | P2-PRICING-MULTI | P2 | Pricing and scope ∈ {many_skus, department, many_customers, multiple_stores} | 02#pricing-and-promotions | Department or multi-customer pricing mismatch |

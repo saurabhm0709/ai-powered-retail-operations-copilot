@@ -2,6 +2,7 @@
 
 from copilot import rules
 from copilot.schemas import DataResult, Facts, TriageResult
+from copilot.triage import extract_pos_severity
 
 
 # Minimal TriageResult for rule tests; override any field with keyword arguments.
@@ -29,8 +30,28 @@ def test_keyword_category_prefers_immediate_risk():
 
 
 def test_multi_register_outage_is_p1():
-    triage = make_triage("POS and Payments", scope="all_registers")
+    triage = make_triage("POS and Payments", scope="all_registers", pos_severity="outage")
     assert rules.decide_priority(triage, []) == ("P1", "P1-POS-OUTAGE")
+
+
+def test_multi_register_unknown_severity_fails_safe_to_p1():
+    triage = make_triage("POS and Payments", scope="multiple_registers")   # pos_severity defaults to "unknown"
+    assert rules.decide_priority(triage, []) == ("P1", "P1-POS-OUTAGE")
+
+
+def test_multi_register_degraded_is_p2_with_matrix_team():
+    triage = make_triage("POS and Payments", scope="multiple_registers", pos_severity="degraded")
+    assert rules.decide_priority(triage, []) == ("P2", "P2-POS-DEGRADED")
+    winner = rules.fired_rules(triage, [])[0]
+    escalation = rules.build_escalation([winner["trigger"]], 0.7, "P2", blocked=False)
+    assert escalation.team == "Store Manager + POS Support"
+
+
+def test_pos_severity_keywords():
+    assert extract_pos_severity("Registers 3 and 4 cannot take card payments") == "outage"
+    assert extract_pos_severity("Card payments on several registers are slow and timing out") == "degraded"
+    assert extract_pos_severity("Tills are slow and now register 2 is down") == "outage"   # outage wins
+    assert extract_pos_severity("Question about register float counts") == "unknown"
 
 
 def test_single_register_is_p3():

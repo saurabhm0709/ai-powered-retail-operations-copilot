@@ -78,11 +78,21 @@ PRIORITY_RULES = [
      "citations": [f"{VQ}#recall-and-safety", f"{SOP}#priority-rules"],
      "trigger": "Contamination, injury, recall, or unsafe equipment",
      "reason": "Possible injury, recall or unsafe equipment is P1."},
+    # Multi-register POS issues split on severity. The runbook makes "multiple registers ... cannot process
+    # card payments" P1; the SOP makes "multiple registers degraded" P2. Unknown severity is treated as an
+    # outage (fail safe: a human looks at it). Both use the matrix's multi-register row for team and SLA.
     {"id": "P1-POS-OUTAGE", "priority": "P1",
-     "when": lambda t, f, hd: t.category == "POS and Payments" and t.facts.scope in MULTI_REGISTER_SCOPES,
+     "when": lambda t, f, hd: t.category == "POS and Payments" and t.facts.scope in MULTI_REGISTER_SCOPES
+                              and t.facts.pos_severity in ("outage", "unknown"),
      "citations": [f"{POS}#pos-card-reader-runbook", f"{SOP}#priority-rules"],
      "trigger": "Multiple registers or store-wide payment outage",
      "reason": "Multiple registers or a store-wide payment outage is P1."},
+    {"id": "P2-POS-DEGRADED", "priority": "P2",
+     "when": lambda t, f, hd: t.category == "POS and Payments" and t.facts.scope in MULTI_REGISTER_SCOPES
+                              and t.facts.pos_severity == "degraded",
+     "citations": [f"{SOP}#priority-rules", f"{POS}#pos-card-reader-runbook"],
+     "trigger": "Multiple registers or store-wide payment outage",
+     "reason": "Multiple registers degraded (slow or intermittent, still processing) is P2."},
     {"id": "P2-STOCKOUT", "priority": "P2",
      "when": lambda t, f, hd: "stockout_high_demand" in f or ("stockout" in f and t.facts.order_context != "none"),
      "citations": [f"{INV}#stock-outs-and-replenishment"],

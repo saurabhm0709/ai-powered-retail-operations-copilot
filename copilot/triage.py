@@ -46,6 +46,8 @@ FACTS (null / "none" / false / [] when not stated; never guess):
   A defect alone (split seam, crack) is "none" unless someone is hurt or the item is unsafe to use.
 - repeated: "again", "repeated", several complaints. multi_store: two or more stores affected.
 - defect_mentioned: the item itself is damaged or defective (damaged packaging alone is false).
+- pos_severity (payments only): outage = registers cannot process / are down / not working;
+  degraded = slow, intermittent, sometimes failing, timing out; unknown if not stated or not a POS issue.
 - time_window_hours: "last 24 hours" = 24, "last 30 days" = 720. priority_filter: P1-P4 labels named.
 - analytics_intent: only in analytics mode, else null.
 - llm_confidence: 0-1, how sure you are of the category.
@@ -196,6 +198,21 @@ def extract_defect_mentioned(text: str) -> bool:
     return bool(re.search(DEFECT_PATTERN, text, re.IGNORECASE))
 
 
+# 02_pos_pricing_returns_policy.md#pos-card-reader-runbook: "cannot process card payments" = outage (P1);
+# 01_retail_operations_sop.md#priority-rules: "multiple registers degraded" = P2.
+POS_OUTAGE_PATTERN = r"\b(cannot|can't|can not|unable to)\b|\bdown\b|not working|offline|not going through"
+POS_DEGRADED_PATTERN = r"\bslow|intermittent|sometimes|timing out|timed? out|\blag"
+
+
+# Text -> "outage" / "degraded" / "unknown". Outage wins when both appear (fail safe towards P1).
+def extract_pos_severity(text: str) -> str:
+    if re.search(POS_OUTAGE_PATTERN, text, re.IGNORECASE):
+        return "outage"
+    if re.search(POS_DEGRADED_PATTERN, text, re.IGNORECASE):
+        return "degraded"
+    return "unknown"
+
+
 # Text -> order context ("academy order" -> "academy"), "none" if absent.
 def extract_order_context(text: str) -> str:
     match = re.search(r"\b(academy|school|tournament|team)\b", text, re.IGNORECASE)
@@ -216,6 +233,7 @@ def extract_facts(text: str, store_hint: str | None) -> Facts:
         safety_signal=extract_safety_signal(text), order_context=extract_order_context(text),
         repeated=bool(re.search(r"\b(again|repeated|repeatedly|keeps|multiple complaints)\b", text, re.IGNORECASE)),
         multi_store=scope == "multiple_stores", defect_mentioned=extract_defect_mentioned(text),
+        pos_severity=extract_pos_severity(text),
         time_window_hours=extract_time_window(text),
         priority_filter=extract_priority_filter(text), quoted_prices_inr=extract_all_amounts(text),
     )
@@ -316,6 +334,7 @@ def merge_facts(text: str, llm_facts: LLMFacts, store_hint: str | None) -> Facts
         "repeated": code_facts.repeated or llm_facts.repeated,
         "multi_store": code_facts.multi_store or llm_facts.multi_store,
         "defect_mentioned": code_facts.defect_mentioned or llm_facts.defect_mentioned,
+        "pos_severity": code_first(code_facts.pos_severity, llm_facts.pos_severity, "unknown"),
         "time_window_hours": code_first(code_facts.time_window_hours, llm_facts.time_window_hours),
         "priority_filter": code_facts.priority_filter or llm_facts.priority_filter,
         "quoted_prices_inr": code_facts.quoted_prices_inr or llm_facts.quoted_prices_inr,

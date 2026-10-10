@@ -39,6 +39,7 @@ class Facts(BaseModel):
     repeated: bool = False          # "again", "repeated", "multiple complaints"
     multi_store: bool = False
     defect_mentioned: bool = False  # damaged/defective item (not packaging) -> also check quality complaints
+    pos_severity: Literal["outage", "degraded", "unknown"] = "unknown"  # "cannot process" vs "slow/intermittent"
     time_window_hours: int | None   # "last 24 hours" -> 24, "last 30 days" -> 720
     priority_filter: list[Priority] = []   # "P1 and P2 incidents" -> ["P1","P2"] (analytics case_query)
     quoted_prices_inr: list[float] = []    # every INR amount in order, e.g. shelf 899 then POS 1099 (price_lookup)
@@ -58,6 +59,7 @@ class LLMFacts(BaseModel):
     repeated: bool
     multi_store: bool
     defect_mentioned: bool
+    pos_severity: Literal["outage", "degraded", "unknown"]
     time_window_hours: int | None
     priority_filter: list[Priority]
     quoted_prices_inr: list[float]

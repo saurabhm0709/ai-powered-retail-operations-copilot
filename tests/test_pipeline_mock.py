@@ -91,7 +91,8 @@ def test_full_core_name_and_typos_resolve():
 def fake_llm_output(category: str, **fact_updates) -> TriageLLMOutput:
     facts = {"store_id": None, "product_mention": None, "register_id": None, "scope": "unknown",
              "amount_inr": None, "receipt_present": None, "safety_signal": "none", "order_context": "none",
-             "repeated": False, "multi_store": False, "defect_mentioned": False, "time_window_hours": None,
+             "repeated": False, "multi_store": False, "defect_mentioned": False, "pos_severity": "unknown",
+             "time_window_hours": None,
              "priority_filter": [], "quoted_prices_inr": []}
     facts.update(fact_updates)
     return TriageLLMOutput(mode="triage", category=category, llm_confidence=0.9, analytics_intent=None,
