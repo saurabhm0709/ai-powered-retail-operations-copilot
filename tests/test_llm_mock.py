@@ -2,6 +2,8 @@
 
 from types import SimpleNamespace
 
+import httpx
+import openai
 import pytest
 from pydantic import BaseModel
 
@@ -31,6 +33,7 @@ def make_fake_client(parsed: BaseModel | None) -> SimpleNamespace:
 def isolated(monkeypatch, tmp_path):
     monkeypatch.setattr(config, "CACHE_DIR", tmp_path)
     monkeypatch.setattr(config, "MOCK_LLM", False)
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key-not-real")
     monkeypatch.setattr(llm.time, "sleep", lambda seconds: None)
     monkeypatch.setattr(llm, "get_client", lambda: pytest.fail("real OpenAI client used"))
     api_utils.reset_call_count()
@@ -87,3 +90,30 @@ def test_budget_error_is_not_swallowed_by_retries(monkeypatch):
     monkeypatch.setattr(llm, "get_client", lambda: make_fake_client(Answer(text="x")))
     with pytest.raises(RuntimeError):
         llm.structured("sys", "user text", Answer, max_tokens=50)
+
+
+def test_missing_key_skips_call_without_counting(monkeypatch, caplog):
+    monkeypatch.delenv("OPENAI_API_KEY")
+    result, usage = llm.structured("sys", "user text", Answer, max_tokens=50)
+    assert result is None
+    assert api_utils.call_count() == 0
+    assert "OPENAI_API_KEY is not set" in caplog.text
+
+
+def test_auth_error_is_not_retried_and_key_text_not_logged(monkeypatch, caplog):
+    response = httpx.Response(401, request=httpx.Request("POST", "https://api.openai.com/v1/chat/completions"))
+    error = openai.AuthenticationError("Incorrect API key provided: sk-abc...wxyz", response=response, body=None)
+    fake = make_fake_client(None)
+    attempts = []
+
+    def failing_parse(**kwargs):
+        attempts.append(kwargs)
+        raise error
+
+    fake.chat.completions.parse = failing_parse
+    monkeypatch.setattr(llm, "get_client", lambda: fake)
+    result, usage = llm.structured("sys", "user text", Answer, max_tokens=50)
+    assert result is None
+    assert len(attempts) == 1
+    assert "AuthenticationError" in caplog.text
+    assert "sk-abc" not in caplog.text

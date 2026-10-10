@@ -1,5 +1,7 @@
 """OpenAI structured-output call: cache -> counter -> call -> retry(2), with a mock switch (ARCHITECTURE.md §4)."""
 
+import logging
+import os
 import time
 from functools import lru_cache
 
@@ -7,6 +9,16 @@ import openai
 from pydantic import BaseModel
 
 from copilot import api_utils, config
+
+logger = logging.getLogger(__name__)
+
+# Errors a retry cannot fix (wrong key, no access to the model): stop after the first attempt.
+NON_RETRYABLE_ERRORS = (openai.AuthenticationError, openai.PermissionDeniedError)
+
+
+# Reason -> one warning line. Only the error class name is logged: auth error messages can contain part of the key.
+def warn_fallback(reason: str) -> None:
+    logger.warning("LLM unavailable (%s); using the deterministic fallback.", reason)
 
 
 # Creates the OpenAI client once; it reads OPENAI_API_KEY from the environment (.env).
@@ -43,6 +55,9 @@ def structured(system: str, user: str, schema: type[BaseModel],
                max_tokens: int) -> tuple[BaseModel | None, dict]:
     if config.MOCK_LLM:
         return None, empty_usage(mock=True)
+    if not os.getenv("OPENAI_API_KEY"):  # no key: no call is made or counted
+        warn_fallback("OPENAI_API_KEY is not set")
+        return None, empty_usage()
     key = api_utils.cache_key(user, system, config.OPENAI_MODEL, config.TEMPERATURE,
                               max_tokens, config.PROMPT_VERSION, schema.__name__)
     for attempt in range(config.MAX_RETRIES + 1):
@@ -51,7 +66,11 @@ def structured(system: str, user: str, schema: type[BaseModel],
                 key, lambda: call_openai(system, user, schema, max_tokens))
             usage = {**result["usage"], "cached": from_cache, "mock": False}
             return schema.model_validate(result["parsed"]), usage
+        except NON_RETRYABLE_ERRORS as error:
+            warn_fallback(type(error).__name__)
+            return None, empty_usage()
         except (openai.OpenAIError, ValueError):  # API failure or invalid JSON; budget RuntimeError is not caught
             if attempt < config.MAX_RETRIES:
                 time.sleep(config.RETRY_BACKOFF_SECONDS * (2 ** attempt))
+    warn_fallback(f"failed after {config.MAX_RETRIES + 1} attempts")
     return None, empty_usage()
