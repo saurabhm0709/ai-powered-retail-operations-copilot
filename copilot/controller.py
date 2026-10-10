@@ -80,12 +80,21 @@ def ordered_citations(selected_rules: list[dict], data_results: list[DataResult]
     return citations
 
 
+# PRIORITY_MODE=llm (evaluation comparison only): the LLM's suggested priority replaces the rule winner's.
+# Escalation is then recomputed from that priority; citations and matrix rows stay rule-based.
+def apply_priority_mode(winner: dict, triage: TriageResult) -> dict:
+    if config.PRIORITY_MODE != "llm" or triage.llm_priority is None:
+        return winner
+    return {**winner, "id": "LLM-PRIORITY", "priority": triage.llm_priority,
+            "reason": f"LLM-suggested priority (comparison mode); rules chose {winner['id']}."}
+
+
 # Safety + triage + hits + data -> Decision: final priority by rules, escalation from the matrix rows of
 # the deciding rules, citations from rules + data tools + retrieval, and the mock workflow payload.
 def decide(safety: SafetyCheck, triage: TriageResult, hits: list[PolicyHit],
            data_results: list[DataResult]) -> Decision:
     selected = rules.deciding_rules(rules.fired_rules(triage, data_results))
-    winner = selected[0]
+    winner = apply_priority_mode(selected[0], triage)
     triggers = [rule["trigger"] for rule in selected if rule["trigger"]]
     escalation = rules.build_escalation(triggers, triage.confidence, winner["priority"], blocked=False)
     allowed = ordered_citations(selected, data_results, hits)

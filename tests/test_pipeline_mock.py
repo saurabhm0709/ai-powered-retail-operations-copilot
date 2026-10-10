@@ -95,7 +95,7 @@ def fake_llm_output(category: str, **fact_updates) -> TriageLLMOutput:
              "priority_filter": [], "quoted_prices_inr": []}
     facts.update(fact_updates)
     return TriageLLMOutput(mode="triage", category=category, llm_confidence=0.9, analytics_intent=None,
-                           facts=LLMFacts(**facts), short_reasoning="test")
+                           facts=LLMFacts(**facts), suggested_priority="P3", short_reasoning="test")
 
 
 def test_llm_triage_facts_are_normalised_and_sku_resolved_by_code(monkeypatch):
@@ -107,6 +107,18 @@ def test_llm_triage_facts_are_normalised_and_sku_resolved_by_code(monkeypatch):
     assert result.facts.register_id == "REG-03"
     assert result.facts.sku == "SKU7001"
     assert result.llm_confidence == 0.9
+    assert result.llm_priority == "P3"
+
+
+def test_priority_mode_llm_uses_llm_suggestion_only_when_set(monkeypatch):
+    output = fake_llm_output("POS and Payments", register_id="2")
+    monkeypatch.setattr(triage.llm, "structured",
+                        lambda system, user, schema, max_tokens: (output, {}) if schema is TriageLLMOutput else (None, {}))
+    text = "Every till at ST030 is offline and no payments go through."
+    assert orchestrator.run(text).priority == "P1"            # rules mode: store-wide outage
+    monkeypatch.setattr(config, "PRIORITY_MODE", "llm")
+    response = orchestrator.run(text)
+    assert response.priority == "P3" and response.priority_rule_id == "LLM-PRIORITY"
 
 
 def test_llm_category_disagreeing_with_keywords_lowers_confidence(monkeypatch):

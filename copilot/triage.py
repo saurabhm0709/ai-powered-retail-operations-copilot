@@ -50,6 +50,17 @@ FACTS (null / "none" / false / [] when not stated; never guess):
 - analytics_intent: only in analytics mode, else null.
 - llm_confidence: 0-1, how sure you are of the category.
 
+PRIORITY (suggested_priority, your own estimate from 01_retail_operations_sop.md#priority-rules; code decides
+the final priority):
+- P1: immediate human escalation: store-wide POS/payment outage, payment data or credential request, product
+  safety or recall risk, equipment injury risk, unsafe fitness machine, active customer safety issue.
+- P2: high impact, no immediate danger: repeated stock-out of high-demand items, vendor short shipment affecting
+  replenishment, pricing error affecting many customers, multiple registers degraded, repeated quality
+  complaints, urgent manager review (e.g. refund above approval threshold).
+- P3: routine store issue: one register or card reader down, one SKU below reorder point, single shelf label
+  mismatch, standard return, one-store inventory discrepancy.
+- P4: general inquiry: policy questions, reporting requests, guidance with no active issue.
+
 EXAMPLES (input -> key fields):
 1. "Barcode scanner at till 2 in ST014 freezes after each scan; the other tills are fine."
    -> mode triage, category POS and Payments, store_id ST014, register_id "2", scope one_register.
@@ -318,8 +329,9 @@ def triage_from_llm(output: TriageLLMOutput, text: str, store_hint: str | None) 
     if output.mode == "analytics" and analytics_intent is None:
         analytics_intent = detect_mode(text)[1] or "other"
     llm_confidence = max(0.0, min(1.0, output.llm_confidence))
-    return finish_triage(output.mode, output.category, llm_confidence, rules.keyword_category(text), facts,
-                         analytics_intent, output.short_reasoning)
+    result = finish_triage(output.mode, output.category, llm_confidence, rules.keyword_category(text), facts,
+                           analytics_intent, output.short_reasoning)
+    return result.model_copy(update={"llm_priority": output.suggested_priority})
 
 
 # Masked text + persona + UI store -> the user message for the Triage LLM (masked text only).

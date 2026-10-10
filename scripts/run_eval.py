@@ -1,7 +1,7 @@
 """Runs the public test cases (and our extra cases with --extra) through the copilot; writes
 outputs/predictions.csv (exact schema) and outputs/metrics.md (ARCHITECTURE.md §9).
 
-Usage: python scripts/run_eval.py [--extra]
+Usage: python scripts/run_eval.py [--extra] [--priority-mode llm]
 Mode comes from MOCK_LLM in .env. Real mode makes up to 2 paid calls per uncached request; cached runs are free.
 """
 
@@ -16,7 +16,7 @@ from pathlib import Path
 # Lets "python scripts/run_eval.py" import the copilot package from the project root.
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from copilot import api_utils, config, orchestrator, rag, safety  # noqa: E402
+from copilot import config, orchestrator, rag, safety, triage  # noqa: E402
 from copilot.schemas import CopilotResponse  # noqa: E402
 
 EXTRA_CASES_PATH = config.PROJECT_ROOT / "tests" / "extra_cases.csv"
@@ -149,6 +149,25 @@ def compute_metrics(results: list[tuple[dict, CopilotResponse, float]]) -> dict:
     }
 
 
+# Results -> rules vs LLM-suggested priority accuracy on cases that reached triage (blocked ones never do).
+# Re-running triage reads the LLM cache written by the run, so it makes no new paid call.
+def priority_comparison(results: list[tuple[dict, CopilotResponse, float]]) -> str:
+    rules_correct = llm_correct = scored = 0
+    for case, response, _ in results:
+        check = safety.check_input(case["prompt"])
+        if check.blocked:
+            continue
+        llm_priority = triage.triage(check, case["persona"], None).llm_priority
+        if llm_priority is None:   # mock mode or LLM failure: nothing to compare
+            continue
+        scored += 1
+        rules_correct += response.priority == case["expected_priority"]
+        llm_correct += llm_priority == case["expected_priority"]
+    if not scored:
+        return "n/a (needs real LLM mode)"
+    return f"rules {ratio(rules_correct, scored)} vs LLM {ratio(llm_correct, scored)}"
+
+
 # Results -> latency p50 / p95 in ms.
 def latency_line(results: list[tuple[dict, CopilotResponse, float]]) -> str:
     latencies = sorted(ms for _, _, ms in results)
@@ -184,6 +203,7 @@ def metrics_section(title: str, results: list[tuple[dict, CopilotResponse, float
     lines = [f"## {title} ({len(results)} cases)", "", "| Metric | Value | Target |", "|---|---|---|"]
     for name, value in compute_metrics(results).items():
         lines.append(f"| {name} | {value} | {TARGETS[name]} |")
+    lines.append(f"| Priority: rules vs LLM-suggested | {priority_comparison(results)} | report |")
     lines += [f"| Latency | {latency_line(results)} | report |", ""]
     misses = miss_lines(results)
     lines += ["Misses (category / priority):", ""]
@@ -205,7 +225,10 @@ def write_predictions(path: Path, results: list[tuple[dict, CopilotResponse, flo
 def main() -> None:
     parser = argparse.ArgumentParser(description="Evaluate the copilot on the public (and extra) test cases.")
     parser.add_argument("--extra", action="store_true", help="also run tests/extra_cases.csv")
+    parser.add_argument("--priority-mode", choices=["rules", "llm"], default=config.PRIORITY_MODE,
+                        help="llm = use the LLM's suggested priority (comparison only)")
     args = parser.parse_args()
+    config.PRIORITY_MODE = args.priority_mode
     started = time.time()
     sections = [metrics_section("Public test cases", run_and_save("public_test_cases", "predictions.csv"))]
     if args.extra:
@@ -213,7 +236,7 @@ def main() -> None:
     calls, prompt_tokens, completion_tokens = new_call_usage(started)
     cost = prompt_tokens * PRICE_INPUT + completion_tokens * PRICE_OUTPUT
     mode = "MOCK_LLM" if config.MOCK_LLM else config.OPENAI_MODEL
-    header = (f"# Evaluation metrics\n\nMode: {mode}. Anchor: {config.ANCHOR}. New paid LLM calls this run: {calls} "
+    header = (f"# Evaluation metrics\n\nMode: {mode}, priority mode: {config.PRIORITY_MODE}. Anchor: {config.ANCHOR}. New paid LLM calls this run: {calls} "
               f"(tokens in/out {prompt_tokens}/{completion_tokens}, cost about ${cost:.4f}; cached calls are free).\n\n")
     report = header + "\n".join(sections)
     (config.OUT_DIR / "metrics.md").write_text(report, encoding="utf-8")

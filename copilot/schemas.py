@@ -71,6 +71,7 @@ class TriageLLMOutput(BaseModel):
     llm_confidence: float
     analytics_intent: AnalyticsIntent | None
     facts: LLMFacts
+    suggested_priority: Priority   # used only by PRIORITY_MODE=llm and the rules-vs-LLM comparison
     short_reasoning: str
 
 
@@ -88,6 +89,7 @@ class TriageResult(BaseModel):     # LLM fills these via structured output (exce
     preliminary_rule_id: str
     missing_fields: list[str]
     short_reasoning: str
+    llm_priority: Priority | None = None   # LLM's own suggestion; final priority is decided by rules
 
 
 # One retrieved policy section; the citation is also the ChromaDB chunk id.
