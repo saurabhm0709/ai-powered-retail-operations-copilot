@@ -5,7 +5,7 @@ import json
 import pytest
 
 from copilot import config, data_agent, orchestrator, rag, safety, triage
-from copilot.schemas import CopilotResponse
+from copilot.schemas import CopilotResponse, LLMFacts, TriageLLMOutput
 from copilot.triage import extract_facts
 
 
@@ -84,3 +84,40 @@ def test_full_core_name_and_typos_resolve():
     assert data_agent.resolve_sku("Match Football")[0] == "SKU2003"
     assert data_agent.resolve_sku("tenis ball pack")[0] == "SKU7001"
     assert data_agent.find_product_mention("Is the Tennis Ball Pack in stock for the academy?") == "Tennis Ball Pack"
+
+
+# A fixed TriageLLMOutput, as if returned by the LLM (no network).
+def fake_llm_output(category: str, **fact_updates) -> TriageLLMOutput:
+    facts = {"store_id": None, "product_mention": None, "register_id": None, "scope": "unknown",
+             "amount_inr": None, "receipt_present": None, "safety_signal": "none", "order_context": "none",
+             "repeated": False, "multi_store": False, "defect_mentioned": False, "time_window_hours": None,
+             "priority_filter": [], "quoted_prices_inr": []}
+    facts.update(fact_updates)
+    return TriageLLMOutput(mode="triage", category=category, llm_confidence=0.9, analytics_intent=None,
+                           facts=LLMFacts(**facts), short_reasoning="test")
+
+
+def test_llm_triage_facts_are_normalised_and_sku_resolved_by_code(monkeypatch):
+    output = fake_llm_output("Inventory and Replenishment", store_id="store 12",
+                             product_mention="tenis ball pack", register_id="till 3")
+    monkeypatch.setattr(triage.llm, "structured", lambda *args: (output, {}))
+    result = triage.triage(safety.check_input("The tennis balls are gone at the Ludhiana branch."), None, None)
+    assert result.facts.store_id == "ST012"
+    assert result.facts.register_id == "REG-03"
+    assert result.facts.sku == "SKU7001"
+    assert result.llm_confidence == 0.9
+
+
+def test_llm_category_disagreeing_with_keywords_lowers_confidence(monkeypatch):
+    output = fake_llm_output("Customer Service")
+    monkeypatch.setattr(triage.llm, "structured", lambda *args: (output, {}))
+    result = triage.triage(safety.check_input("Card reader at register 2 in ST004 is offline."), None, None)
+    assert result.category == "Customer Service"
+    assert result.confidence == 0.7   # 0.9 - 0.20 for disagreeing with the keyword classifier
+
+
+def test_llm_failure_falls_back_to_keyword_triage(monkeypatch):
+    monkeypatch.setattr(triage.llm, "structured", lambda *args: (None, {}))
+    result = triage.triage(safety.check_input("Card reader at register 2 in ST004 is offline."), None, None)
+    assert result.category == "POS and Payments"
+    assert result.short_reasoning.startswith("Keyword classifier")

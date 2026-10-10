@@ -44,6 +44,36 @@ class Facts(BaseModel):
     quoted_prices_inr: list[float] = []    # every INR amount in order, e.g. shelf 899 then POS 1099 (price_lookup)
 
 
+# Facts the Triage LLM reads from the text. No sku: code resolves the SKU from product_mention.
+# No defaults: OpenAI strict structured output requires every field.
+class LLMFacts(BaseModel):
+    store_id: str | None
+    product_mention: str | None
+    register_id: str | None
+    scope: Scope
+    amount_inr: float | None
+    receipt_present: bool | None
+    safety_signal: SafetySignal
+    order_context: Literal["academy", "school", "tournament", "team", "none"]
+    repeated: bool
+    multi_store: bool
+    defect_mentioned: bool
+    time_window_hours: int | None
+    priority_filter: list[Priority]
+    quoted_prices_inr: list[float]
+
+
+# Triage LLM structured output. No sku, priority, calibrated confidence, routing or missing fields:
+# code decides those after the call (ARCHITECTURE.md §6 [2]).
+class TriageLLMOutput(BaseModel):
+    mode: Literal["triage", "analytics", "policy_question"]
+    category: Category
+    llm_confidence: float
+    analytics_intent: AnalyticsIntent | None
+    facts: LLMFacts
+    short_reasoning: str
+
+
 # Triage Agent output: classification, routing and preliminary priority.
 class TriageResult(BaseModel):     # LLM fills these via structured output (except sku/priority)
     mode: Literal["triage", "analytics", "policy_question"]
