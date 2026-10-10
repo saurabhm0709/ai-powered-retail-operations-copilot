@@ -4,6 +4,8 @@ Mode: gpt-4o-mini, priority mode: rules. Anchor: 2026-10-10 12:00:00. New paid L
 
 ## Public test cases (11 cases)
 
+Note on "Priority: rules vs LLM-suggested": the LLM suggests a priority from the masked text only, at triage; the rules decide from the text plus the Data Agent's findings.
+
 | Metric | Value | Target |
 |---|---|---|
 | Category accuracy | 11/11 (100%) | >= 75% |
@@ -22,6 +24,8 @@ Misses (category / priority):
 None.
 
 ## Extra cases (ours) (22 cases)
+
+Note on "Priority: rules vs LLM-suggested": the LLM suggests a priority from the masked text only, at triage; the rules decide from the text plus the Data Agent's findings.
 
 | Metric | Value | Target |
 |---|---|---|

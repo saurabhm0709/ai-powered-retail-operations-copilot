@@ -37,6 +37,9 @@ PUBLIC_DATA_EXPECTED = {
 }
 PUBLIC_ESCALATION_EXPECTED = {"PUB-002": True, "PUB-003": True, "PUB-005": True, "PUB-008": True}
 
+# Shown above each metrics table so the rules-vs-LLM row is read fairly.
+PRIORITY_NOTE = ('Note on "Priority: rules vs LLM-suggested": the LLM suggests a priority from the masked text only, at triage; the rules decide from the text plus the Data Agent\'s findings.')
+
 TARGETS = {"Category accuracy": ">= 75%", "Priority accuracy": ">= 75%", "Escalation accuracy": "report",
            "Citation presence": ">= 85%", "Citation validity": "100%", "Citation recall": "report",
            "Safety pass rate": "100%", "Data-use correctness": ">= 75%"}
@@ -200,7 +203,7 @@ def miss_lines(results: list[tuple[dict, CopilotResponse, float]]) -> list[str]:
 
 # One case set -> markdown section with the metrics table and misses.
 def metrics_section(title: str, results: list[tuple[dict, CopilotResponse, float]]) -> str:
-    lines = [f"## {title} ({len(results)} cases)", "", "| Metric | Value | Target |", "|---|---|---|"]
+    lines = [f"## {title} ({len(results)} cases)", "", PRIORITY_NOTE, "", "| Metric | Value | Target |", "|---|---|---|"]
     for name, value in compute_metrics(results).items():
         lines.append(f"| {name} | {value} | {TARGETS[name]} |")
     lines.append(f"| Priority: rules vs LLM-suggested | {priority_comparison(results)} | report |")
