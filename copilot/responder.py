@@ -151,6 +151,9 @@ def compose(safety_check: SafetyCheck, triage: TriageResult, hits: list[PolicyHi
     answer, limitations = draft.answer, None if hits else NO_POLICY_LINE
     if not decision.policy_confirmed:
         answer, limitations = f"{answer} {UNCONFIRMED_POLICY_LINE}", UNCONFIRMED_POLICY_LINE
+    # P1: code guarantees safe guidance comes first, whatever the LLM wrote (template already starts with it).
+    if decision.priority == "P1" and not answer.startswith(P1_GUIDANCE):
+        answer = f"{P1_GUIDANCE} {answer}"
     data_used = []
     for result in data_results:
         data_used.extend(name for name in result.data_used if name not in data_used)

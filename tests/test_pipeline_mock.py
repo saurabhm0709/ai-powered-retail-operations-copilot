@@ -222,3 +222,13 @@ def test_p1_answer_gives_guidance_before_the_follow_up():
     assert response.priority == "P1"
     assert response.answer.startswith(responder.P1_GUIDANCE)   # guidance first in the answer ...
     assert response.follow_up_question != response.answer     # ... the question is a separate field
+
+
+def test_p1_llm_answer_gets_safe_guidance_prepended(monkeypatch):
+    fake_draft = ResponseLLMOutput(answer="Escalate to the quality P1 queue.", next_actions=[],
+                                   follow_up_question=None, citations=[])
+    monkeypatch.setattr(responder.llm, "structured",
+                        lambda system, user, schema, max_tokens: (fake_draft, {}) if schema is ResponseLLMOutput else (None, {}))
+    response = orchestrator.run("A customer was injured when a treadmill belt slipped at ST012.")
+    assert response.priority == "P1"
+    assert response.answer == f"{responder.P1_GUIDANCE} Escalate to the quality P1 queue."
