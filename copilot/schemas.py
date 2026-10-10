@@ -88,6 +88,18 @@ class Escalation(BaseModel):
     reason: str
 
 
+# Controller decision: final priority, escalation, citations and workflow payload (ARCHITECTURE.md §6 [4b]).
+class Decision(BaseModel):
+    priority: Priority
+    rule_id: str
+    priority_reason: str
+    fired_rule_ids: list[str]      # winning rule first, then other rules that fired
+    allowed_citations: list[str]   # the only ids the responder may cite
+    citations: list[str]           # final list: rule citations first, then retrieved, max 4
+    escalation: Escalation
+    workflow_payload: dict | None
+
+
 # Final response returned to the UI; maps 1:1 to a predictions.csv row.
 class CopilotResponse(BaseModel):
     trace_id: str

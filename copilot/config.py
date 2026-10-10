@@ -27,6 +27,7 @@ EVAL_DIR = PROJECT_ROOT / "evaluation"
 OUT_DIR = PROJECT_ROOT / "outputs"
 CHROMA_DIR = PROJECT_ROOT / ".chroma"
 CACHE_DIR = PROJECT_ROOT / ".cache"
+TRACES_PATH = OUT_DIR / "traces.jsonl"
 
 # --- LLM ---
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
@@ -65,3 +66,8 @@ QUALITY_WINDOW_DAYS = 30
 # --- Retrieval (tuning values, not policy) ---
 RAG_TOP_K = 4
 RAG_MAX_DISTANCE = 0.65  # cosine distance cutoff; tune against the public tests
+CHROMA_COLLECTION = "policies"
+MAX_CITATIONS = 4  # ARCHITECTURE.md §6 [4b]: final citations list is capped at 4
+
+# --- Mock mode ---
+MOCK_LLM_CONFIDENCE = 0.7  # ARCHITECTURE.md §6 [2]: fixed llm_confidence for the keyword classifier
