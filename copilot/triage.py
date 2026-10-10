@@ -156,12 +156,15 @@ def triage(safety, persona: str | None, store_hint: str | None) -> TriageResult:
     mode, analytics_intent = detect_mode(text)
     category = rules.keyword_category(text)
     facts = extract_facts(text, store_hint)
+    missing_fields = find_missing_fields(category, facts)
+    # In the keyword path the "LLM" category IS the keyword category, so only missing fields lower confidence.
+    confidence = rules.calibrate_confidence(config.MOCK_LLM_CONFIDENCE, category, category, missing_fields)
     result = TriageResult(
         mode=mode, category=category,
-        llm_confidence=config.MOCK_LLM_CONFIDENCE, confidence=config.MOCK_LLM_CONFIDENCE,  # TODO step 2: calibrate
+        llm_confidence=config.MOCK_LLM_CONFIDENCE, confidence=confidence,
         facts=facts, needs_policy=True, needs_data=needs_data_for(mode, category, facts),
         analytics_intent=analytics_intent, preliminary_priority="P3", preliminary_rule_id="P3-DEFAULT",
-        missing_fields=find_missing_fields(category, facts),
+        missing_fields=missing_fields,
         short_reasoning=f"Keyword classifier matched '{category}'.",
     )
     priority, rule_id = rules.decide_priority(result, data_results=[])

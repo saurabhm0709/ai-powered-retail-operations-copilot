@@ -43,15 +43,30 @@ def hit_citations(hits: list[PolicyHit]) -> list[str]:
     return citations
 
 
-# Safety + triage + hits + data -> Decision. MINIMAL until rules.py has the full rule table (step 2):
-# priority comes from the triage preliminary rule and citations only from retrieval.
+# Deciding rules + hits -> ordered, deduplicated citations: rule citations first, then retrieved.
+def ordered_citations(selected_rules: list[dict], hits: list[PolicyHit]) -> list[str]:
+    citations = []
+    for rule in selected_rules:
+        for citation in rule["citations"]:
+            if citation not in citations:
+                citations.append(citation)
+    for citation in hit_citations(hits):
+        if citation not in citations:
+            citations.append(citation)
+    return citations
+
+
+# Safety + triage + hits + data -> Decision: final priority by rules, escalation from the matrix rows of
+# the deciding rules, citations from rules + retrieval. Workflow payload is added in step 3.
 def decide(safety: SafetyCheck, triage: TriageResult, hits: list[PolicyHit],
            data_results: list[DataResult]) -> Decision:
-    priority, rule_id = rules.decide_priority(triage, data_results)
-    allowed = hit_citations(hits)
-    escalation = rules.build_escalation([], triage.confidence, priority, blocked=False)
+    selected = rules.deciding_rules(rules.fired_rules(triage, data_results))
+    winner = selected[0]
+    triggers = [rule["trigger"] for rule in selected if rule["trigger"]]
+    escalation = rules.build_escalation(triggers, triage.confidence, winner["priority"], blocked=False)
+    allowed = ordered_citations(selected, hits)
     return Decision(
-        priority=priority, rule_id=rule_id, priority_reason=f"Rule {rule_id} (placeholder rule set).",
-        fired_rule_ids=[rule_id], allowed_citations=allowed,
+        priority=winner["priority"], rule_id=winner["id"], priority_reason=winner["reason"],
+        fired_rule_ids=[rule["id"] for rule in selected], allowed_citations=allowed,
         citations=allowed[:config.MAX_CITATIONS], escalation=escalation, workflow_payload=None,
     )
