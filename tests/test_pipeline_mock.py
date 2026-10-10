@@ -4,8 +4,8 @@ import json
 
 import pytest
 
-from copilot import config, data_agent, orchestrator, rag, safety, triage
-from copilot.schemas import CopilotResponse, LLMFacts, TriageLLMOutput
+from copilot import config, data_agent, orchestrator, rag, responder, safety, triage
+from copilot.schemas import CopilotResponse, LLMFacts, ResponseLLMOutput, TriageLLMOutput
 from copilot.triage import extract_facts
 
 
@@ -121,3 +121,18 @@ def test_llm_failure_falls_back_to_keyword_triage(monkeypatch):
     result = triage.triage(safety.check_input("Card reader at register 2 in ST004 is offline."), None, None)
     assert result.category == "POS and Payments"
     assert result.short_reasoning.startswith("Keyword classifier")
+
+
+def test_responder_drops_injected_fake_citation(monkeypatch):
+    fake_draft = ResponseLLMOutput(answer="Check the reader cable and raise a POS ticket.", next_actions=["Restart"],
+                                   follow_up_question="Which store?", citations=["99_fake.md#anything-goes"])
+    # Triage gets None (keyword path); only the Final Response call returns the fake draft.
+    def fake_structured(system, user, schema, max_tokens):
+        return (fake_draft, {}) if schema is ResponseLLMOutput else (None, {})
+
+    monkeypatch.setattr(responder.llm, "structured", fake_structured)
+    response = orchestrator.run("Card terminal at register 7 in ST010 keeps declining every tap.")
+    assert response.answer == "Check the reader cable and raise a POS ticket."
+    assert "99_fake.md#anything-goes" not in response.citations
+    assert response.citations   # code-decided rule citation is kept
+    assert response.follow_up_question is None   # nothing critical missing, so code drops the question

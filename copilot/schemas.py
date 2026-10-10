@@ -133,6 +133,14 @@ class Decision(BaseModel):
     workflow_payload: dict | None
 
 
+# Final Response LLM structured output; validated by safety.check_output before use.
+class ResponseLLMOutput(BaseModel):
+    answer: str
+    next_actions: list[str]
+    follow_up_question: str | None
+    citations: list[str]
+
+
 # Final response returned to the UI; maps 1:1 to a predictions.csv row.
 class CopilotResponse(BaseModel):
     trace_id: str

@@ -1,9 +1,16 @@
-"""[5] Final Response: template answer from evidence (ARCHITECTURE.md §6 [5]). The LLM draft is added in step 3."""
+"""[5] Final Response: LLM draft from an evidence pack, checked by the output gate, with a template fallback
+(ARCHITECTURE.md §6 [5]). The LLM only writes; priority, escalation and citations were decided by code."""
 
-from copilot.schemas import CopilotResponse, DataResult, Decision, PolicyHit, SafetyCheck, TriageResult
+import json
+
+from copilot import config, data_agent, llm, rag, safety
+from copilot.schemas import (CopilotResponse, DataResult, Decision, PolicyHit, ResponseLLMOutput, SafetyCheck,
+                             TriageResult)
 
 NO_POLICY_LINE = "I cannot confirm the policy for this from the available documents."
 MAX_POLICY_STEPS = 3
+MAX_POLICY_SECTIONS = 6       # sections sent to the LLM (allowed citations, rule ones first)
+SECTION_CHARS = 900           # policy sections are short; this trims only the longest ones
 
 FOLLOW_UP_QUESTIONS = {
     "store_id": "Which store is this (e.g. ST002)?",
@@ -11,6 +18,23 @@ FOLLOW_UP_QUESTIONS = {
     "amount_inr": "What is the refund amount in INR?",
     "receipt_present": "Does the customer have the receipt?",
 }
+
+RESPONSE_SYSTEM_PROMPT = """You write the reply of an internal retail operations copilot for Punjab Sports Mart staff.
+You receive a JSON evidence pack. Priority, escalation and citations were already decided by code.
+
+RULES:
+- Use only the evidence pack. Do not change the priority, the escalation team or the SLA.
+- Every number (stock, quantities, prices, rates, counts, dates) must come from data[].facts or data[].summary_lines.
+  Never calculate new numbers.
+- Cite only ids from allowed_citations, in "citations". Never invent a policy, contact, approval or availability.
+- P1: give immediate safe guidance first.
+- Never say a refund, return, claim, transfer or quarantine is approved, processed or done, and never say
+  equipment is safe. Say it requires manager or human approval / review.
+- Neutral language: "likely linked to", "requires review". Never blame staff, customers or vendors.
+- Do not ask for or repeat card numbers, CVV, OTP, PINs or phone numbers; masked values stay masked.
+- answer: at most 5 sentences. next_actions: at most 5 short imperative steps.
+- follow_up_question: one question only when missing_fields is not empty (offer sku_candidates if given), else null.
+"""
 
 
 # Top policy hit -> up to 3 bullet steps from its section ("- ..." lines), as next actions.
@@ -32,7 +56,7 @@ def follow_up_for(missing_fields: list[str]) -> str | None:
     return None
 
 
-# Decision + hits + data -> template answer text (also the fallback when the LLM fails, step 3).
+# Decision + hits + data -> template answer text (mock mode and the fallback when the LLM fails).
 def template_answer(triage: TriageResult, hits: list[PolicyHit], data_results: list[DataResult],
                     decision: Decision) -> str:
     sentences = [f"Classified as {triage.category}, priority {decision.priority}."]
@@ -47,19 +71,77 @@ def template_answer(triage: TriageResult, hits: list[PolicyHit], data_results: l
     return " ".join(sentences)
 
 
-# All stage outputs -> final CopilotResponse (template path; output gate added in step 3).
-def compose(safety: SafetyCheck, triage: TriageResult, hits: list[PolicyHit],
+# Allowed citations -> [{citation, text}] policy sections for the evidence pack (rule citations first).
+def policy_sections(allowed_citations: list[str]) -> list[dict]:
+    sections = []
+    for citation in allowed_citations[:MAX_POLICY_SECTIONS]:
+        sections.append({"citation": citation, "text": rag.get_section(citation)[:SECTION_CHARS]})
+    return sections
+
+
+# Stage outputs -> JSON evidence pack. Masked text only; numbers only from Data Agent facts.
+def evidence_pack(safety_check: SafetyCheck, triage: TriageResult, data_results: list[DataResult],
+                  decision: Decision) -> str:
+    candidates = [f"{sku} {data_agent.product_name(sku)}" for sku in triage.facts.sku_candidates]
+    escalation = decision.escalation.model_dump(include={"required", "team", "channel", "sla_minutes",
+                                                         "human_approval_required"})
+    pack = {
+        "question": safety_check.masked_text, "mode": triage.mode, "category": triage.category,
+        "decision": {"priority": decision.priority, "rule_id": decision.rule_id,
+                     "priority_reason": decision.priority_reason, "escalation": escalation},
+        "missing_fields": triage.missing_fields, "sku_candidates": candidates,
+        "data": [result.model_dump(include={"tool", "findings", "summary_lines", "facts"})
+                 for result in data_results],
+        "policy_sections": policy_sections(decision.allowed_citations),
+        "allowed_citations": decision.allowed_citations,
+    }
+    return json.dumps(pack, ensure_ascii=False, default=str)
+
+
+# Code-decided citations first, then any extra allowed ones the LLM used, capped (ARCHITECTURE.md §6 [4b]).
+def final_citations(decision: Decision, llm_citations: list[str]) -> list[str]:
+    citations = list(decision.citations)
+    for citation in llm_citations:
+        if citation not in citations:
+            citations.append(citation)
+    return citations[:config.MAX_CITATIONS]
+
+
+# Stage outputs -> checked LLM draft, or None (mock mode, LLM failure or output gate rejection).
+def llm_draft(safety_check: SafetyCheck, triage: TriageResult, data_results: list[DataResult],
+              decision: Decision) -> ResponseLLMOutput | None:
+    draft, _usage = llm.structured(RESPONSE_SYSTEM_PROMPT, evidence_pack(safety_check, triage, data_results, decision),
+                                   ResponseLLMOutput, config.RESPONSE_MAX_TOKENS)
+    if draft is None:
+        return None
+    return safety.check_output(draft, decision.allowed_citations)
+
+
+# Template path -> the same fields as an LLM draft, so compose() treats both paths alike.
+def template_draft(triage: TriageResult, hits: list[PolicyHit], data_results: list[DataResult],
+                   decision: Decision) -> ResponseLLMOutput:
+    return ResponseLLMOutput(answer=template_answer(triage, hits, data_results, decision),
+                             next_actions=policy_steps(hits), follow_up_question=follow_up_for(triage.missing_fields),
+                             citations=[])
+
+
+# All stage outputs -> final CopilotResponse (LLM draft through the output gate, else the template).
+def compose(safety_check: SafetyCheck, triage: TriageResult, hits: list[PolicyHit],
             data_results: list[DataResult], decision: Decision) -> CopilotResponse:
+    draft = llm_draft(safety_check, triage, data_results, decision)
+    if draft is None:
+        draft = template_draft(triage, hits, data_results, decision)
+    # Code decides whether a follow-up is asked: only when a critical field is missing.
+    follow_up = (draft.follow_up_question or follow_up_for(triage.missing_fields)) if triage.missing_fields else None
     data_used = []
     for result in data_results:
         data_used.extend(name for name in result.data_used if name not in data_used)
-    findings = {result.tool: result.findings for result in data_results}
     return CopilotResponse(
         trace_id="", mode=triage.mode, category=triage.category, priority=decision.priority,
         priority_rule_id=decision.rule_id, priority_reason=decision.priority_reason,
-        confidence=triage.confidence, answer=template_answer(triage, hits, data_results, decision),
-        next_actions=policy_steps(hits), follow_up_question=follow_up_for(triage.missing_fields),
-        citations=decision.citations, data_used=data_used, data_findings=findings,
-        escalation=decision.escalation, pii_masked=bool(safety.pii_found), safety_refusal=False,
+        confidence=triage.confidence, answer=draft.answer, next_actions=draft.next_actions,
+        follow_up_question=follow_up, citations=final_citations(decision, draft.citations),
+        data_used=data_used, data_findings={result.tool: result.findings for result in data_results},
+        escalation=decision.escalation, pii_masked=bool(safety_check.pii_found), safety_refusal=False,
         workflow_payload=decision.workflow_payload, limitations=None if hits else NO_POLICY_LINE,
     )

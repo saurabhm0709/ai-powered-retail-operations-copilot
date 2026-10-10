@@ -2,7 +2,7 @@
 
 import re
 
-from copilot.schemas import SafetyCheck
+from copilot.schemas import ResponseLLMOutput, SafetyCheck
 
 # --- Masking patterns: 05_responsible_ai_policy.md#pii-and-payment-data-masking ---
 
@@ -130,4 +130,36 @@ def check_input(text: str) -> SafetyCheck:
     )
 
 
-# TODO: check_output(answer, allowed_citations) — output gate for the final response (later step).
+# --- Output gate: ARCHITECTURE.md §6 [5], 05_responsible_ai_policy.md#human-in-the-loop ---
+
+# Claims that an approval or action already happened. Deliberate narrowing of the spec regex: bare "approved"
+# also blocked safe wording like "manager-approved transfer review".
+COMPLETED_ACTION_PATTERN = re.compile(
+    r"\b(i approve|i have approved|(?:refund|return|claim|transfer|exchange) (?:is|has been) approved"
+    r"|has been refunded|refund (?:is |has been )?processed|claim (?:has been )?submitted"
+    r"|is safe to use|guaranteed)\b", re.IGNORECASE)
+MAX_ANSWER_ACTIONS = 5
+
+
+# Draft citations + allowed set -> only allowed ids, in draft order, deduplicated.
+def allowed_only(citations: list[str], allowed_citations: list[str]) -> list[str]:
+    kept = []
+    for citation in citations:
+        if citation in allowed_citations and citation not in kept:
+            kept.append(citation)
+    return kept
+
+
+# LLM draft + allowed citations -> cleaned draft, or None when the caller must use the template fallback
+# (empty answer or a claim that an approval/action already happened).
+def check_output(draft: ResponseLLMOutput, allowed_citations: list[str]) -> ResponseLLMOutput | None:
+    answer = mask_pii(draft.answer.strip())[0]
+    if not answer or COMPLETED_ACTION_PATTERN.search(answer):
+        return None
+    next_actions = []
+    for action in draft.next_actions[:MAX_ANSWER_ACTIONS]:
+        if action.strip() and not COMPLETED_ACTION_PATTERN.search(action):
+            next_actions.append(mask_pii(action.strip())[0])
+    follow_up = mask_pii(draft.follow_up_question)[0] if draft.follow_up_question else None
+    return ResponseLLMOutput(answer=answer, next_actions=next_actions, follow_up_question=follow_up,
+                             citations=allowed_only(draft.citations, allowed_citations))

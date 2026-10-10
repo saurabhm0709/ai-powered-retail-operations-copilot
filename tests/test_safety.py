@@ -1,6 +1,7 @@
-"""Tests for safety.py (input gate). Own wording only, never the public test prompts."""
+"""Tests for safety.py (input and output gates). Own wording only, never the public test prompts."""
 
-from copilot.safety import check_input, mask_pii
+from copilot.safety import check_input, check_output, mask_pii
+from copilot.schemas import ResponseLLMOutput
 
 
 def test_phone_and_card_masked_but_not_blocked():
@@ -94,3 +95,29 @@ def test_legit_pin_retry_pos_issue_not_blocked():
     )
     assert result.blocked is False
     assert result.threat_type == "none"
+
+
+ALLOWED = ["02_pos_pricing_returns_policy.md#returns-and-refunds", "05_responsible_ai_policy.md#human-in-the-loop"]
+
+
+def draft(answer: str, citations: list[str], actions: list[str] | None = None) -> ResponseLLMOutput:
+    return ResponseLLMOutput(answer=answer, next_actions=actions or [], follow_up_question=None, citations=citations)
+
+
+def test_output_gate_strips_citation_not_in_allowed_set():
+    checked = check_output(draft("Manager approval is required.", [ALLOWED[0], "06_made_up_policy.md#free-refunds"]),
+                           ALLOWED)
+    assert checked.citations == [ALLOWED[0]]
+
+
+def test_output_gate_remasks_pii_in_answer_and_actions():
+    checked = check_output(draft("Call the customer on 9876543210.", [], ["Email jane.doe@example.com"]), ALLOWED)
+    assert "9876543210" not in checked.answer and "******3210" in checked.answer
+    assert "jane.doe@" not in checked.next_actions[0]
+
+
+def test_output_gate_rejects_completed_action_claims_and_empty_answers():
+    assert check_output(draft("The refund has been approved.", ALLOWED), ALLOWED) is None
+    assert check_output(draft("   ", ALLOWED), ALLOWED) is None
+    safe = check_output(draft("A manager-approved transfer review is possible.", ALLOWED), ALLOWED)
+    assert safe is not None
