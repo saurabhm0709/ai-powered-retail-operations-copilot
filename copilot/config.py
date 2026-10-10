@@ -21,10 +21,9 @@ ANCHOR = pd.Timestamp("2026-10-10 12:00:00")
 
 # --- Paths ---
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
-INPUTS_DIR = PROJECT_ROOT / "use-case-3"  # provided read-only inputs live here, not at the repo root
-KB_DIR = INPUTS_DIR / "knowledge_base"
-DATA_DIR = INPUTS_DIR / "data"
-EVAL_DIR = INPUTS_DIR / "evaluation"
+KB_DIR = PROJECT_ROOT / "knowledge_base"
+DATA_DIR = PROJECT_ROOT / "data"
+EVAL_DIR = PROJECT_ROOT / "evaluation"
 OUT_DIR = PROJECT_ROOT / "outputs"
 CHROMA_DIR = PROJECT_ROOT / ".chroma"
 CACHE_DIR = PROJECT_ROOT / ".cache"
