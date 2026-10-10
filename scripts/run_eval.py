@@ -214,6 +214,60 @@ def metrics_section(title: str, results: list[tuple[dict, CopilotResponse, float
     return "\n".join(lines) + "\n"
 
 
+# Case + response -> one "check: expected X, got Y" line per failed check (category, priority, and escalation /
+# safety where an expectation exists). Empty list = the case passed.
+def case_failures(case: dict, response: CopilotResponse) -> list[str]:
+    failures = []
+    if response.category != case["expected_category"]:
+        failures.append(f"category: expected {case['expected_category']}, got {response.category}")
+    if response.priority != case["expected_priority"]:
+        failures.append(f"priority: expected {case['expected_priority']}, got {response.priority} "
+                        f"({response.priority_rule_id})")
+    escalation = expected_escalation(case)
+    if escalation is not None and escalation != response.escalation.required:
+        failures.append(f"escalated: expected {escalation}, got {response.escalation.required}")
+    if safety_pass(case, response) is False:
+        failures.append(f"safety: expected refusal={expected_refusal(case)}, got refusal={response.safety_refusal}, "
+                        f"pii_masked={response.pii_masked}")
+    return failures
+
+
+# Case set name + case + response -> one eval_results.json record (prompts are masked before saving).
+def case_record(case_set: str, case: dict, response: CopilotResponse) -> dict:
+    return {
+        "case_set": case_set, "test_id": case["test_id"], "prompt": safety.mask_pii(case["prompt"])[0],
+        "passed": not case_failures(case, response), "failures": case_failures(case, response),
+        "expected": {"category": case["expected_category"], "priority": case["expected_priority"],
+                     "escalated": expected_escalation(case)},
+        "actual": {"category": response.category, "priority": response.priority,
+                   "escalated": response.escalation.required, "rule": response.priority_rule_id,
+                   "safety_refusal": response.safety_refusal, "citations": response.citations},
+    }
+
+
+# Records -> {expected category: "passed/total (pct)"}.
+def accuracy_by_category(records: list[dict]) -> dict:
+    by_category = {}
+    for record in records:
+        by_category.setdefault(record["expected"]["category"], []).append(record["passed"])
+    return {category: ratio(sum(passed), len(passed)) for category, passed in sorted(by_category.items())}
+
+
+# Records -> printed summary: totals, accuracy per category, failed cases with expected vs actual.
+def print_summary(records: list[dict]) -> None:
+    passed = sum(record["passed"] for record in records)
+    print(f"Total cases: {len(records)}   Passed: {passed}   Failed: {len(records) - passed}\n")
+    print("Accuracy by scenario category:")
+    for category, value in accuracy_by_category(records).items():
+        print(f"  {category:<30} {value}")
+    failed = [record for record in records if not record["passed"]]
+    print(f"\nFailed cases: {'none' if not failed else ''}")
+    for record in failed:
+        print(f"  {record['test_id']}: {record['prompt'][:90]}")
+        for failure in record["failures"]:
+            print(f"      - {failure}")
+
+
 # Rows -> predictions CSV in the provided column order.
 def write_predictions(path: Path, results: list[tuple[dict, CopilotResponse, float]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -224,7 +278,7 @@ def write_predictions(path: Path, results: list[tuple[dict, CopilotResponse, flo
             writer.writerow(prediction_row(case["test_id"], response))
 
 
-# Folder -> every file this run writes goes there (the Streamlit re-run button uses this so the committed
+# Folder -> every file this run writes goes there (for trial runs, so the committed
 # outputs/predictions.csv and metrics.md are never overwritten).
 def redirect_outputs(out_dir: Path) -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -245,9 +299,11 @@ def main() -> None:
     if args.out_dir:
         redirect_outputs(Path(args.out_dir))
     started = time.time()
-    sections = [metrics_section("Public test cases", run_and_save("public_test_cases", "predictions.csv"))]
+    case_sets = [("public", "Public test cases", run_and_save("public_test_cases", "predictions.csv"))]
     if args.extra:
-        sections.append(metrics_section("Extra cases (ours)", run_and_save("extra_cases", "predictions_extra.csv")))
+        case_sets.append(("extra", "Extra cases (ours)", run_and_save("extra_cases", "predictions_extra.csv")))
+    sections = [metrics_section(title, results) for _, title, results in case_sets]
+    records = [case_record(name, case, response) for name, _, results in case_sets for case, response, _ in results]
     calls, prompt_tokens, completion_tokens = new_call_usage(started)
     cost = prompt_tokens * PRICE_INPUT + completion_tokens * PRICE_OUTPUT
     mode = "MOCK_LLM" if config.MOCK_LLM else config.OPENAI_MODEL
@@ -255,8 +311,13 @@ def main() -> None:
               f"(tokens in/out {prompt_tokens}/{completion_tokens}, cost about ${cost:.4f}; cached calls are free).\n\n")
     report = header + "\n".join(sections)
     (config.OUT_DIR / "metrics.md").write_text(report, encoding="utf-8")
+    results_path = config.OUT_DIR / "eval_results.json"
+    results_path.write_text(json.dumps({"mode": mode, "new_paid_calls": calls, "cases": records}, indent=2),
+                            encoding="utf-8")
     sys.stdout.reconfigure(encoding="utf-8")
-    print(report)
+    print(f"Mode: {mode}. New paid LLM calls: {calls} (about ${cost:.4f}; cached calls are free).\n")
+    print_summary(records)
+    print(f"\nSaved: {results_path}, {config.OUT_DIR / 'metrics.md'} (full metrics table), predictions CSV(s).")
 
 
 # Case set name + output file -> results (public cases come from evaluation/, extra cases from tests/).
