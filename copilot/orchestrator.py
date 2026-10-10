@@ -5,7 +5,7 @@ import time
 import uuid
 from datetime import datetime
 
-from copilot import api_utils, config, controller, data_agent, rag, responder, safety, triage
+from copilot import api_utils, config, controller, data_agent, rag, responder, safety, triage, workflow
 from copilot.schemas import CopilotResponse
 
 
@@ -35,6 +35,9 @@ def finish(response: CopilotResponse, trace: dict) -> CopilotResponse:
     trace["llm_calls"] = api_utils.call_count() - trace.pop("calls_at_start")
     trace["model"] = "mock" if config.MOCK_LLM else config.OPENAI_MODEL
     trace.update(rule_id=response.priority_rule_id, priority=response.priority, citations=response.citations)
+    if response.workflow_payload:
+        workflow.append_ticket(response.workflow_payload)
+        trace["ticket_id"] = response.workflow_payload["ticket_id"]
     write_trace(trace)
     return response.model_copy(update={"trace_id": trace["trace_id"]})
 

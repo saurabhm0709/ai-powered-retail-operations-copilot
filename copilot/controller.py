@@ -1,6 +1,6 @@
 """[4b] Safety & Workflow Controller — decision step and blocked-request refusal (ARCHITECTURE.md §6 [4a], [4b])."""
 
-from copilot import config, rules
+from copilot import config, rules, workflow
 from copilot.schemas import CopilotResponse, DataResult, Decision, PolicyHit, SafetyCheck, TriageResult
 
 INJECTION_CITATION = "05_responsible_ai_policy.md#prompt-injection"
@@ -48,7 +48,7 @@ def refusal(safety: SafetyCheck) -> CopilotResponse:
                       f"Raise legitimate access needs with {escalation.team} via {escalation.channel}."],
         follow_up_question=None, citations=citations, data_used=[], data_findings={},
         escalation=escalation, pii_masked=bool(safety.pii_found), safety_refusal=True,
-        workflow_payload=None, limitations=None,
+        workflow_payload=workflow.security_payload(safety, category, rule_id, escalation), limitations=None,
     )
 
 
@@ -81,7 +81,7 @@ def ordered_citations(selected_rules: list[dict], data_results: list[DataResult]
 
 
 # Safety + triage + hits + data -> Decision: final priority by rules, escalation from the matrix rows of
-# the deciding rules, citations from rules + data tools + retrieval. Workflow payload is added in step 3.
+# the deciding rules, citations from rules + data tools + retrieval, and the mock workflow payload.
 def decide(safety: SafetyCheck, triage: TriageResult, hits: list[PolicyHit],
            data_results: list[DataResult]) -> Decision:
     selected = rules.deciding_rules(rules.fired_rules(triage, data_results))
@@ -89,8 +89,10 @@ def decide(safety: SafetyCheck, triage: TriageResult, hits: list[PolicyHit],
     triggers = [rule["trigger"] for rule in selected if rule["trigger"]]
     escalation = rules.build_escalation(triggers, triage.confidence, winner["priority"], blocked=False)
     allowed = ordered_citations(selected, data_results, hits)
+    payload = workflow.build_payload(safety, triage, winner["priority"], winner["id"], winner["reason"],
+                                     escalation, data_results)
     return Decision(
         priority=winner["priority"], rule_id=winner["id"], priority_reason=winner["reason"],
         fired_rule_ids=[rule["id"] for rule in selected], allowed_citations=allowed,
-        citations=allowed[:config.MAX_CITATIONS], escalation=escalation, workflow_payload=None,
+        citations=allowed[:config.MAX_CITATIONS], escalation=escalation, workflow_payload=payload,
     )

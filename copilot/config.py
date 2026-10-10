@@ -28,6 +28,7 @@ OUT_DIR = PROJECT_ROOT / "outputs"
 CHROMA_DIR = PROJECT_ROOT / ".chroma"
 CACHE_DIR = PROJECT_ROOT / ".cache"
 TRACES_PATH = OUT_DIR / "traces.jsonl"
+TICKETS_PATH = OUT_DIR / "tickets.jsonl"  # mock workflow system
 
 # --- LLM ---
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
