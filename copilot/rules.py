@@ -199,6 +199,7 @@ def calibrate_confidence(llm_confidence: float, llm_category: str, keyword_cat: 
                          missing_fields: list[str]) -> float:
     confidence = llm_confidence
     if llm_category != keyword_cat:
-        confidence -= 0.20
-    confidence -= min(0.10 * len(missing_fields), 0.20)
+        confidence -= config.CATEGORY_DISAGREE_PENALTY
+    # Small on purpose: a missing field is answered by the follow-up question, not by escalation.
+    confidence -= min(config.MISSING_FIELD_PENALTY * len(missing_fields), config.MISSING_FIELD_PENALTY_MAX)
     return round(max(0.0, min(1.0, confidence)), 2)

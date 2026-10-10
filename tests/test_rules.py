@@ -71,7 +71,10 @@ def test_deciding_rules_keep_secondary_p2_only():
 def test_calibrate_confidence():
     assert rules.calibrate_confidence(0.9, "POS and Payments", "POS and Payments", []) == 0.9
     assert rules.calibrate_confidence(0.9, "POS and Payments", "Customer Service", []) == 0.7
-    assert rules.calibrate_confidence(0.7, "A", "A", ["store_id", "sku", "amount_inr"]) == 0.5  # max -0.20
+    assert rules.calibrate_confidence(0.7, "A", "A", ["store_id"]) == 0.65
+    assert rules.calibrate_confidence(0.7, "A", "A", ["store_id", "sku", "amount_inr"]) == 0.6  # max -0.10
+    # Missing fields alone never push the mock confidence (0.7) below the 0.60 escalation threshold.
+    assert rules.calibrate_confidence(0.7, "A", "A", ["store_id", "sku"]) >= 0.60
 
 
 def test_escalation_merges_teams_and_takes_min_sla():

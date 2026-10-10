@@ -314,8 +314,10 @@ continue normally (`blocked=False`, `pii_masked=True`). The user *requesting* re
    all mention tokens (difflib fallback, stdlib); prefer core SKUs (not starting `SKU8`) when several match; if still >1 and
    no disambiguating context → `sku_candidates` (top 3) and add `"sku"` to `missing_fields`.
 4. **Confidence calibration** (`rules.calibrate_confidence`): start with `llm_confidence`; −0.20 if the keyword
-   classifier disagrees on category; −0.10 per missing critical field (POS: none; Inventory: store or sku;
-   Returns: amount or receipt status; Pricing: product) max −0.20; clamp to [0,1]. Below 0.60 → escalation.
+   classifier disagrees on category; −0.05 per missing critical field (POS: none; Inventory: store or sku;
+   Returns: amount or receipt status; Pricing: product) max −0.10; clamp to [0,1]. Below 0.60 → escalation.
+   Missing fields drive the follow-up question, not escalation: asking one question is cheaper than paging a
+   manager; escalation means a human must decide.
 5. **Preliminary priority** = `rules.decide_priority(triage, data_results=[])`.
 6. **Routing:** `needs_policy` = True for every non-blocked request (policy answers must cite);
    `needs_data` = mode == analytics OR category in {Inventory, Vendor, Product Quality, Returns} OR a SKU/store is

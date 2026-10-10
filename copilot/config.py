@@ -46,6 +46,12 @@ PRIORITY_MODE = os.getenv("PRIORITY_MODE", "rules")  # "rules" | "llm"; "llm" on
 # --- Policy thresholds ---
 # 05_responsible_ai_policy.md#human-in-the-loop, 01_retail_operations_sop.md#escalation-policy
 CONFIDENCE_ESCALATION = 0.60
+# ARCHITECTURE.md §6 [2] step 4: the keyword classifier disagreeing on category is real doubt about the case.
+CATEGORY_DISAGREE_PENALTY = 0.20
+# Missing fields drive the follow-up question, not escalation: asking one question is cheaper than paging
+# a manager; escalation = a human must decide. So they cost little (05_responsible_ai_policy.md#uncertainty).
+MISSING_FIELD_PENALTY = 0.05
+MISSING_FIELD_PENALTY_MAX = 0.10
 # 02_pos_pricing_returns_policy.md#returns-and-refunds
 REFUND_APPROVAL_ANY = 5000
 # 02_pos_pricing_returns_policy.md#returns-and-refunds
