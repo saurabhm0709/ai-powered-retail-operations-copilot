@@ -77,7 +77,7 @@ diverge. If a rule in this file conflicts with ARCHITECTURE.md, this file wins; 
 
 ## Secrets
 - API keys live only in `.env` (listed in `.gitignore`). Commit `.env.example` with empty values:
-  `OPENAI_API_KEY=`, `OPENAI_MODEL=gpt-4o-mini`, `MOCK_LLM=0`, `PRIORITY_MODE=rules`.
+  `OPENAI_API_KEY=`, `OPENAI_MODEL=gpt-4o-mini`, `MOCK_LLM=1`, `PRIORITY_MODE=rules`.
 - Each member uses their own key with their own spending cap where possible. Never paste a key in code,
   chat, commits or logs.
 - Never read, print, log or commit `.env` or any key.
