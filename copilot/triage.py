@@ -58,6 +58,23 @@ def extract_amount(text: str) -> float | None:
     return float(match.group(1).replace(",", "")) if match else None
 
 
+# Text -> every INR/Rs amount in order ("shelf INR 899 but POS INR 1099" -> [899.0, 1099.0]).
+def extract_all_amounts(text: str) -> list[float]:
+    amounts = []
+    for match in re.finditer(r"(?:INR|Rs\.?|₹)\s?([\d,]+(?:\.\d+)?)", text, re.IGNORECASE):
+        amounts.append(float(match.group(1).replace(",", "")))
+    return amounts
+
+
+# Text -> priority labels named in it ("P1 and P2 incidents" -> ["P1", "P2"]).
+def extract_priority_filter(text: str) -> list[str]:
+    labels = []
+    for label in re.findall(r"\bP([1-4])\b", text, re.IGNORECASE):
+        if f"P{label}" not in labels:
+            labels.append(f"P{label}")
+    return labels
+
+
 # Text -> False for "no/without receipt", True for "with/has receipt", None if not mentioned.
 def extract_receipt_present(text: str) -> bool | None:
     if re.search(r"\b(no|without|lost|missing)\s+(the\s+)?receipt", text, re.IGNORECASE):
@@ -121,6 +138,7 @@ def extract_facts(text: str, store_hint: str | None) -> Facts:
         repeated=bool(re.search(r"\b(again|repeated|repeatedly|keeps|multiple complaints)\b", text, re.IGNORECASE)),
         multi_store=scope == "multiple_stores",
         time_window_hours=extract_time_window(text),
+        priority_filter=extract_priority_filter(text), quoted_prices_inr=extract_all_amounts(text),
     )
 
 

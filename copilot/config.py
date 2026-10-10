@@ -62,6 +62,16 @@ VENDOR_FILL_WARN = 0.80
 VENDOR_ONTIME_WARN = 0.85
 # 04_vendor_quality_policy.md#product-quality-complaints
 QUALITY_WINDOW_DAYS = 30
+# 04_vendor_quality_policy.md#product-quality-complaints ("repeated" = at least 2 complaints or 2 stores)
+REPEATED_COMPLAINTS_MIN = 2
+
+# --- Data Agent (tuning values, not policy) ---
+WAREHOUSE_ID = "WH001"
+RECEIPT_HISTORY_N = 3          # receipts checked per store+SKU (ARCHITECTURE.md §6 [3B])
+RELATED_CASES_DAYS = 30        # window for related support cases
+CASE_QUERY_DEFAULT_HOURS = 24  # analytics window when the question names none
+CASE_QUERY_PRIORITIES = ["P1", "P2", "P3", "P4"]  # all priorities when the question names none
+MAX_LIST_ITEMS = 5             # cap on ranked lists / evidence rows passed to the answer
 
 # --- Retrieval (tuning values, not policy) ---
 RAG_TOP_K = 4
