@@ -4,7 +4,7 @@ import json
 
 import pytest
 
-from copilot import config, orchestrator, rag
+from copilot import config, data_agent, orchestrator, rag, safety, triage
 from copilot.schemas import CopilotResponse
 from copilot.triage import extract_facts
 
@@ -64,3 +64,23 @@ def test_extract_facts_from_text():
     assert facts.amount_inr == 1450.0
     assert facts.receipt_present is False
     assert facts.sku == "SKU5003"
+
+
+def test_ambiguous_mention_gives_candidates_and_missing_sku():
+    result = triage.triage(safety.check_input("Customer at ST004 asks about a treadmill they bought."), None, None)
+    assert result.facts.sku is None
+    assert result.facts.sku_candidates[0] == "SKU5002"   # core product offered first
+    assert len(result.facts.sku_candidates) == 3
+    assert "sku" in result.missing_fields
+
+
+def test_single_partial_word_does_not_resolve_silently():
+    sku, candidates = data_agent.resolve_sku("running")
+    assert sku is None
+    assert "SKU6001" in candidates
+
+
+def test_full_core_name_and_typos_resolve():
+    assert data_agent.resolve_sku("Match Football")[0] == "SKU2003"
+    assert data_agent.resolve_sku("tenis ball pack")[0] == "SKU7001"
+    assert data_agent.find_product_mention("Is the Tennis Ball Pack in stock for the academy?") == "Tennis Ball Pack"

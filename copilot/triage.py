@@ -108,11 +108,12 @@ def extract_order_context(text: str) -> str:
 
 # Masked text + UI store hint -> Facts, all by regex and code (no LLM).
 def extract_facts(text: str, store_hint: str | None) -> Facts:
-    sku, sku_candidates = data_agent.resolve_sku(text)
+    mention = data_agent.find_product_mention(text)
+    sku, sku_candidates = data_agent.resolve_sku(mention) if mention else (None, [])
     scope = extract_scope(text)
     return Facts(
         store_id=extract_store_id(text, store_hint),
-        product_mention=data_agent.product_name(sku) if sku else None,
+        product_mention=mention,
         sku=sku, sku_candidates=sku_candidates,
         register_id=extract_register_id(text), scope=scope,
         amount_inr=extract_amount(text), receipt_present=extract_receipt_present(text),
@@ -140,6 +141,9 @@ def find_missing_fields(category: str, facts: Facts) -> list[str]:
     for field in CRITICAL_FIELDS.get(category, []):
         if getattr(facts, field) is None:
             missing.append(field)
+    # An ambiguous product needs a follow-up in every category (ARCHITECTURE.md §6 [2] step 3).
+    if facts.sku_candidates and "sku" not in missing:
+        missing.append("sku")
     return missing
 
 
