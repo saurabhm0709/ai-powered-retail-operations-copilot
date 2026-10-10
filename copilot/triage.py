@@ -163,7 +163,7 @@ def extract_scope(text: str) -> str:
         return "all_registers"
     if re.search(r"store-?wide|whole store|entire store", lowered):
         return "one_store"
-    if re.search(r"\b(multiple|several|two|three|many) registers\b|registers \d+ and \d+", lowered):
+    if re.search(r"\b(multiple|several|two|three|many) (registers|tills|counters)\b|registers \d+ and \d+", lowered):
         return "multiple_registers"
     if re.search(r"\b(register|reg)\b", lowered):
         return "one_register"
@@ -200,7 +200,8 @@ def extract_defect_mentioned(text: str) -> bool:
 
 # 02_pos_pricing_returns_policy.md#pos-card-reader-runbook: "cannot process card payments" = outage (P1);
 # 01_retail_operations_sop.md#priority-rules: "multiple registers degraded" = P2.
-POS_OUTAGE_PATTERN = r"\b(cannot|can't|can not|unable to)\b|\bdown\b|not working|offline|not going through"
+POS_OUTAGE_PATTERN = (r"\b(cannot|can't|can not|unable to)\b|\bdown\b|not working|offline|not going through"
+                      r"|frozen|freez|stopped working|not responding")
 POS_DEGRADED_PATTERN = r"\bslow|intermittent|sometimes|timing out|timed? out|\blag"
 
 
@@ -317,6 +318,17 @@ def code_first(code_value, llm_value, unknown=None):
     return llm_value if code_value == unknown else code_value
 
 
+# Regex + LLM POS severity -> one value. The regex may only escalate: a false P2 on a real outage (a store
+# that cannot take payments waits hours) costs far more than a false P1 on slow tills (a human downgrades it).
+# So regex "outage" always wins; regex "degraded" is used only when the LLM could not tell.
+def merge_pos_severity(code_severity: str, llm_severity: str) -> str:
+    if code_severity == "outage":
+        return "outage"
+    if llm_severity != "unknown":
+        return llm_severity
+    return code_severity
+
+
 # Regex facts + LLM facts -> one normalised Facts. Store: text regex > LLM > UI hint.
 def merge_facts(text: str, llm_facts: LLMFacts, store_hint: str | None) -> Facts:
     code_facts = extract_facts(text, None)
@@ -334,7 +346,7 @@ def merge_facts(text: str, llm_facts: LLMFacts, store_hint: str | None) -> Facts
         "repeated": code_facts.repeated or llm_facts.repeated,
         "multi_store": code_facts.multi_store or llm_facts.multi_store,
         "defect_mentioned": code_facts.defect_mentioned or llm_facts.defect_mentioned,
-        "pos_severity": code_first(code_facts.pos_severity, llm_facts.pos_severity, "unknown"),
+        "pos_severity": merge_pos_severity(code_facts.pos_severity, llm_facts.pos_severity),
         "time_window_hours": code_first(code_facts.time_window_hours, llm_facts.time_window_hours),
         "priority_filter": code_facts.priority_filter or llm_facts.priority_filter,
         "quoted_prices_inr": code_facts.quoted_prices_inr or llm_facts.quoted_prices_inr,

@@ -122,6 +122,21 @@ def test_priority_mode_llm_uses_llm_suggestion_only_when_set(monkeypatch):
     assert response.priority == "P3" and response.priority_rule_id == "LLM-PRIORITY"
 
 
+def test_llm_outage_is_not_downgraded_by_slow_in_text(monkeypatch):
+    output = fake_llm_output("POS and Payments", pos_severity="outage")
+    monkeypatch.setattr(triage.llm, "structured",
+                        lambda system, user, schema, max_tokens: (output, {}) if schema is TriageLLMOutput else (None, {}))
+    response = orchestrator.run("Card payments on all registers at ST030 were slow and now nothing goes through.")
+    assert response.priority == "P1" and response.priority_rule_id == "P1-POS-OUTAGE"
+
+
+def test_pos_severity_merge_only_escalates():
+    assert triage.merge_pos_severity("outage", "degraded") == "outage"    # regex outage always wins
+    assert triage.merge_pos_severity("degraded", "outage") == "outage"    # regex degraded cannot downgrade
+    assert triage.merge_pos_severity("degraded", "unknown") == "degraded"
+    assert triage.merge_pos_severity("unknown", "degraded") == "degraded"
+
+
 def test_llm_category_disagreeing_with_keywords_lowers_confidence(monkeypatch):
     output = fake_llm_output("Customer Service")
     monkeypatch.setattr(triage.llm, "structured", lambda *args: (output, {}))
