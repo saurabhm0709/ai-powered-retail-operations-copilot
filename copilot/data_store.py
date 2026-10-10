@@ -34,8 +34,10 @@ def load_table(name: str) -> pd.DataFrame:
     for column in YES_NO_COLUMNS.get(name, []):
         table[column] = table[column] == "Yes"
     # Blank text cells become "" so string filters (.str.contains) never meet NaN.
-    text_columns = table.select_dtypes(include="object").columns
-    table[text_columns] = table[text_columns].fillna("")
+    # is_string_dtype works on pandas 2 (object) and pandas 3 (str) text columns.
+    for column in table.columns:
+        if pd.api.types.is_string_dtype(table[column]):
+            table[column] = table[column].fillna("")
     return table
 
 
