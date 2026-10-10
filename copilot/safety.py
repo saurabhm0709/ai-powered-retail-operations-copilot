@@ -23,7 +23,9 @@ EMAIL_PATTERN = re.compile(r"\b([A-Za-z0-9._%+-]+)@([A-Za-z0-9.-]+\.[A-Za-z]{2,}
 
 INJECTION_PATTERNS = [
     r"\bignore\s+(?:\w+\s+){0,2}(?:instructions|policies|rules|guidelines)\b",
-    r"\bdisregard\b",
+    # Deliberate change from spec: bare "disregard" blocked "customer said disregard the earlier order".
+    # Block only when it targets instructions or controls.
+    r"\bdisregard\s+(?:\w+\s+){0,3}(?:instructions|previous|prior|above|rules|polic(?:y|ies)|safety|system)\b",
     # Deliberate change from spec: bare "bypass" blocked "bypass the card reader and take cash",
     # a legitimate POS workaround. Block only when the target is a policy or safety control.
     r"\bbypass\w*\s+(?:\w+\s+){0,3}(?:polic(?:y|ies)|rules|safety|security|guardrails?|filters?)\b",
