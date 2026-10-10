@@ -12,7 +12,8 @@ Scope = Literal["one_register", "multiple_registers", "all_registers", "one_sku"
                 "department", "one_store", "multiple_stores", "many_customers", "unknown"]
 SafetySignal = Literal["injury", "recall", "unsafe_equipment", "equipment_malfunction", "none"]
 AnalyticsIntent = Literal["open_cases_window", "vendor_quality_ranking", "quality_trend", "short_shipments",
-                          "stockout_root_cause", "returns_summary", "inventory_below_reorder", "other"]
+                          "stockout_root_cause", "returns_summary", "inventory_below_reorder",
+                          "store_procurement_summary", "other"]
 
 
 # Input gate output: masked text plus whether the request is blocked and why.

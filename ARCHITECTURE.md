@@ -186,7 +186,8 @@ Scope = Literal["one_register","multiple_registers","all_registers","one_sku","m
                 "department","one_store","multiple_stores","many_customers","unknown"]
 SafetySignal = Literal["injury","recall","unsafe_equipment","equipment_malfunction","none"]
 AnalyticsIntent = Literal["open_cases_window","vendor_quality_ranking","quality_trend","short_shipments",
-                          "stockout_root_cause","returns_summary","inventory_below_reorder","other"]
+                          "stockout_root_cause","returns_summary","inventory_below_reorder",
+                          "store_procurement_summary","other"]
 
 class SafetyCheck(BaseModel):
     masked_text: str
@@ -364,11 +365,14 @@ The LLM never writes pandas code; the dispatcher selects tools deterministically
 | `quality_complaints(sku=None, vendor_id=None, days=30)` | returns_quality rows whose reason/notes match quality keywords (seam, split, crack, warp, torn, defect, quality, lost air, slipp, loose, malfunction, unsafe, injur) — NOT "Damaged packaging"; + support_cases with category Product Quality and Safety; join product→vendor; counts by vendor/sku/store | `repeated_quality_complaints` (≥2 complaints or ≥2 stores), `safety_incident` |
 | `vendor_quality_ranking(days=30)` | quality_complaints grouped by vendor_id + vendor name + fill/on-time rates, sorted desc | `repeated_quality_complaints` for the top vendor if count ≥ 2 |
 | `case_query(priorities, statuses=("Open","In Progress"), hours=24)` | window `(ANCHOR − hours, ANCHOR]`; group by store_id, category_label; add matrix team per category | — |
+| `store_procurement_summary(store, top_n=5)` | receipts for the store with date ≤ anchor, summed po/received qty per SKU, sorted by received desc, + product name; labelled "received from vendors (not customer sales)" | — |
+| `unsupported_analytics()` | analytics intent `other`: says the data cannot answer and lists what data exists (no customer sales) | `unsupported_analytics` |
 | `refund_check(amount, receipt_present)` | approval if amount ≥ 5000, or receipt absent and amount ≥ 1000; no-receipt always needs manager review | `refund_needs_approval`, `no_receipt_review` |
 | `price_lookup(sku)` | product list_price | `price_mismatch_confirmed` when the quoted POS price equals list price and shelf differs |
 
 **Dispatcher (`run_data_agent(triage) -> list[DataResult]`):**
-- analytics intents → `case_query` / `vendor_quality_ranking` / `quality_complaints` / `receipt` summary / returns summary.
+- analytics intents → `case_query` / `vendor_quality_ranking` / `quality_complaints` / `receipt` summary / returns summary
+  / `store_procurement_summary` (needs store; else follow-up asks for it) / intent `other` → `unsupported_analytics`.
 - Inventory with store+sku → `stockout_root_cause`.
 - Vendor with store+sku → `receipt_history` + `vendor_performance`.
 - Quality with sku → `quality_complaints(sku)`; without sku → `quality_complaints()` filtered by product mention.
