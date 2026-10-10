@@ -1,7 +1,7 @@
 """Runs the public test cases (and our extra cases with --extra) through the copilot; writes
 outputs/predictions.csv (exact schema) and outputs/metrics.md (ARCHITECTURE.md §9).
 
-Usage: python scripts/run_eval.py [--extra] [--priority-mode llm]
+Usage: python scripts/run_eval.py [--extra] [--priority-mode llm] [--out-dir DIR]
 Mode comes from MOCK_LLM in .env. Real mode makes up to 2 paid calls per uncached request; cached runs are free.
 """
 
@@ -224,14 +224,26 @@ def write_predictions(path: Path, results: list[tuple[dict, CopilotResponse, flo
             writer.writerow(prediction_row(case["test_id"], response))
 
 
+# Folder -> every file this run writes goes there (the Streamlit re-run button uses this so the committed
+# outputs/predictions.csv and metrics.md are never overwritten).
+def redirect_outputs(out_dir: Path) -> None:
+    out_dir.mkdir(parents=True, exist_ok=True)
+    config.OUT_DIR = out_dir
+    config.TRACES_PATH = out_dir / "traces.jsonl"
+    config.TICKETS_PATH = out_dir / "tickets.jsonl"
+
+
 # Runs the sets, writes predictions + metrics, prints the metrics.
 def main() -> None:
     parser = argparse.ArgumentParser(description="Evaluate the copilot on the public (and extra) test cases.")
     parser.add_argument("--extra", action="store_true", help="also run tests/extra_cases.csv")
     parser.add_argument("--priority-mode", choices=["rules", "llm"], default=config.PRIORITY_MODE,
                         help="llm = use the LLM's suggested priority (comparison only)")
+    parser.add_argument("--out-dir", help="write predictions, metrics, traces and tickets here instead of outputs/")
     args = parser.parse_args()
     config.PRIORITY_MODE = args.priority_mode
+    if args.out_dir:
+        redirect_outputs(Path(args.out_dir))
     started = time.time()
     sections = [metrics_section("Public test cases", run_and_save("public_test_cases", "predictions.csv"))]
     if args.extra:

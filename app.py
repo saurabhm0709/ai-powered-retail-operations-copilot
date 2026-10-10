@@ -3,8 +3,11 @@
 Run: streamlit run app.py
 """
 
+import io
 import subprocess
 import sys
+import tempfile
+from pathlib import Path
 
 import pandas as pd
 import streamlit as st
@@ -137,21 +140,50 @@ def dashboard_tab() -> None:
     st.caption("Complaint counts are a signal for review, not proof of vendor fault.")
 
 
-# Evaluation tab: saved metrics + predictions, download, and a re-run button.
+EVAL_FILES = ["metrics.md", "predictions.csv", "predictions_extra.csv"]
+
+
+# Runs run_eval.py into a temporary folder -> {file name: bytes}. outputs/ is never written.
+def run_evaluation_to_memory() -> dict:
+    with tempfile.TemporaryDirectory() as temp_dir:
+        subprocess.run([sys.executable, "scripts/run_eval.py", "--extra", "--out-dir", temp_dir],
+                       cwd=config.PROJECT_ROOT, check=False)
+        files = {}
+        for name in EVAL_FILES:
+            path = Path(temp_dir) / name
+            if path.exists():
+                files[name] = path.read_bytes()
+    return files
+
+
+# {file name: bytes} -> metrics as markdown, predictions as tables, each with a download button.
+def show_eval_files(files: dict, key_prefix: str) -> None:
+    if "metrics.md" in files:
+        st.markdown(files["metrics.md"].decode("utf-8"))
+    for name in EVAL_FILES[1:]:
+        if name in files:
+            st.markdown(f"**{name}**")
+            st.dataframe(pd.read_csv(io.BytesIO(files[name])), width="stretch")
+    for name, content in files.items():
+        st.download_button(f"Download {name}", content, file_name=name, key=f"{key_prefix}-{name}")
+
+
+# Evaluation tab: a non-destructive re-run (kept in session state) and the committed sample outputs.
 def evaluation_tab() -> None:
     cost_note = "free in mock mode" if config.MOCK_LLM else "uses the LLM cache; only new cases cost money"
     if st.button(f"Run evaluation on public + extra cases ({cost_note})"):
         with st.spinner("Running evaluation..."):
-            subprocess.run([sys.executable, "scripts/run_eval.py", "--extra"], cwd=config.PROJECT_ROOT, check=False)
-    metrics_path = config.OUT_DIR / "metrics.md"
-    if metrics_path.exists():
-        st.markdown(metrics_path.read_text(encoding="utf-8"))
-    for name in ["predictions.csv", "predictions_extra.csv"]:
+            st.session_state["eval_run"] = run_evaluation_to_memory()
+    if st.session_state.get("eval_run"):
+        st.subheader("This session's run (not saved to outputs/)")
+        show_eval_files(st.session_state["eval_run"], "run")
+    st.subheader("Committed sample outputs (outputs/)")
+    saved = {}
+    for name in EVAL_FILES[:2]:
         path = config.OUT_DIR / name
         if path.exists():
-            st.markdown(f"**{name}**")
-            st.dataframe(pd.read_csv(path), width="stretch")
-            st.download_button(f"Download {name}", path.read_bytes(), file_name=name, mime="text/csv")
+            saved[name] = path.read_bytes()
+    show_eval_files(saved, "saved")
 
 
 # Page entry point.
