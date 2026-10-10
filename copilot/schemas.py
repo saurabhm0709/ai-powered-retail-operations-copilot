@@ -102,6 +102,7 @@ class PolicyHit(BaseModel):
     source_id: str
     text: str
     score: float
+    conflicts: dict = {}           # {rule: [{"value", "section"}]} for the whole document (rag.find_conflicts)
 
 
 # One Data Agent tool result; the only source of numbers in the answer.
@@ -166,3 +167,4 @@ class CopilotResponse(BaseModel):
     safety_refusal: bool
     workflow_payload: dict | None
     limitations: str | None
+    policy_conflicts: list[str] = []   # conflicting policy values that affect this answer (UI warning banner)

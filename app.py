@@ -58,6 +58,8 @@ def show_answer(response: CopilotResponse) -> None:
         st.warning("Request refused by the safety gate.")
     if response.pii_masked:
         st.info("Personal or payment data in the request was masked before processing.")
+    for conflict in response.policy_conflicts:
+        st.warning(f"**Conflicting policy — confirm with the Store Manager.** {conflict}", icon="⚠️")
     st.subheader("Answer")
     st.write(response.answer)
     if response.next_actions:
@@ -138,9 +140,16 @@ def dashboard_tab() -> None:
     st.caption("Complaint counts are a signal for review, not proof of vendor fault.")
 
 
+# Logs a [CONFLICT] warning once per server start for every policy rule stated with different values.
+@st.cache_resource
+def startup_conflict_check() -> list[str]:
+    return rag.log_conflicts()
+
+
 # Page entry point.
 def main() -> None:
     st.set_page_config(page_title="Retail Ops Copilot", layout="wide")
+    startup_conflict_check()
     persona, store_hint = sidebar()
     copilot, dashboard = st.tabs(["Copilot", "Dashboard"])
     with copilot:

@@ -5,7 +5,7 @@ import json
 import pytest
 
 from copilot import config, data_agent, orchestrator, rag, responder, safety, triage
-from copilot.schemas import CopilotResponse, LLMFacts, ResponseLLMOutput, TriageLLMOutput
+from copilot.schemas import CopilotResponse, LLMFacts, PolicyHit, ResponseLLMOutput, TriageLLMOutput
 from copilot.triage import extract_facts
 
 
@@ -186,6 +186,57 @@ def test_responder_drops_injected_fake_citation(monkeypatch):
     assert "99_fake.md#anything-goes" not in response.citations
     assert response.citations   # code-decided rule citation is kept
     assert response.follow_up_question is None   # nothing critical missing, so code drops the question
+
+
+CONFLICTING_DOC = """# Demo Policy
+Source ID: DEMO-01
+Returns are accepted within 15 days of invoice.
+
+## Returns
+A customer may return an item within 30 days of invoice.
+
+## Recovery
+We offer an 18-day return window. Damaged goods are reported within 2 days of delivery.
+"""
+RETURN_CONFLICT = {"return_window_days": [{"value": 15, "section": "document header"},
+                                          {"value": 30, "section": "Returns"}, {"value": 18, "section": "Recovery"}]}
+
+
+def test_find_conflicts_scans_header_and_all_sections():
+    assert rag.find_conflicts(CONFLICTING_DOC) == RETURN_CONFLICT   # the single "2 days of delivery" is no conflict
+
+
+@pytest.mark.parametrize("days, status", [(10, "all_versions_agree"), (15, "all_versions_agree"),
+                                          (16, "conflict_affects_answer"), (31, "all_versions_agree"),
+                                          (None, "conflict_affects_answer")])
+def test_conflict_matters_only_between_the_values(days, status):
+    note = responder.conflict_note("DEMO-01", "return_window_days", RETURN_CONFLICT["return_window_days"], days)
+    assert note["status"] == status
+
+
+def conflict_hit(citation: str) -> PolicyHit:
+    return PolicyHit(citation=citation, file=citation.split("#")[0], section="Returns and Refunds",
+                     source_id="DEMO-01", text="Returns and Refunds", score=0.5, conflicts=RETURN_CONFLICT)
+
+
+def test_conflict_is_not_flagged_for_an_unrelated_question():
+    hits = [conflict_hit("02_pos_pricing_returns_policy.md#pos-card-reader-runbook")]
+    assert responder.relevant_conflicts(hits, "Card reader on register 2 shows error 05", "POS and Payments") == []
+
+
+def test_llm_draft_that_picks_one_value_falls_back_to_the_conflict_answer(monkeypatch):
+    def fake_structured(system, user, schema, max_tokens):
+        draft = ResponseLLMOutput(answer="The return window is 30 days, so you can accept it.", next_actions=[],
+                                  follow_up_question=None, citations=[])
+        return (draft, {}) if schema is ResponseLLMOutput else (None, {})
+
+    monkeypatch.setattr(responder.llm, "structured", fake_structured)
+    monkeypatch.setattr(orchestrator.rag, "retrieve",
+                        lambda *args, **kwargs: [conflict_hit("02_pos_pricing_returns_policy.md#returns-and-refunds")])
+    response = orchestrator.run("Customer wants to return an item bought 20 days ago, can we accept it")
+    assert "so you can accept it" not in response.answer
+    assert all(f"{days} days" in response.answer for days in (15, 18, 30))
+    assert response.policy_conflicts
 
 
 def test_ticket_appended_with_masked_text_and_pending_approval():

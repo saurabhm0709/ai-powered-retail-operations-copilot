@@ -5,6 +5,7 @@ Embeddings use ChromaDB's default local model (all-MiniLM-L6-v2): free, no API k
 """
 
 import argparse
+import json
 import sys
 from pathlib import Path
 
@@ -29,13 +30,18 @@ def build_collection(client: chromadb.ClientAPI, chunks: list[dict]) -> chromadb
     return collection
 
 
-# True when the saved collection already holds exactly these chunk ids (nothing to do).
+# True when the saved collection already holds exactly these chunks, same text and metadata (nothing to do).
+# Comparing ids alone missed edits inside a section, so the index kept serving the old text.
 def index_is_current(client: chromadb.ClientAPI, chunks: list[dict]) -> bool:
     existing_names = [collection.name for collection in client.list_collections()]
     if config.CHROMA_COLLECTION not in existing_names:
         return False
-    saved_ids = client.get_collection(config.CHROMA_COLLECTION).get()["ids"]
-    return sorted(saved_ids) == sorted(chunk["id"] for chunk in chunks)
+    saved = client.get_collection(config.CHROMA_COLLECTION).get()
+    # sort_keys: ChromaDB returns metadata keys in its own order.
+    saved_metadata = [json.dumps(item, sort_keys=True) for item in saved["metadatas"]]
+    saved_chunks = sorted(zip(saved["ids"], saved["documents"], saved_metadata))
+    current_chunks = [(chunk["id"], chunk["text"], json.dumps(chunk["metadata"], sort_keys=True)) for chunk in chunks]
+    return saved_chunks == sorted(current_chunks)
 
 
 # Builds the index if missing, changed, or --rebuild; prints the chunk ids either way.
@@ -52,6 +58,7 @@ def main() -> None:
         print(f"Built index: {len(chunks)} chunks in {config.CHROMA_DIR}")
     for chunk in chunks:
         print(" ", chunk["id"])
+    rag.log_conflicts()   # prints a [CONFLICT] warning per rule stated with different values
 
 
 if __name__ == "__main__":

@@ -1,5 +1,7 @@
 """[3A] RAG Agent: chunks the KB by "## " section (used by build_index) and retrieves from the saved index."""
 
+import json
+import logging
 import re
 from functools import lru_cache
 from pathlib import Path
@@ -8,6 +10,12 @@ import chromadb
 
 from copilot import config
 from copilot.schemas import PolicyHit
+
+logger = logging.getLogger(__name__)
+# Rule values that must agree inside one document: "within 15 days of invoice", "a 30-day return window".
+# Group 1 = number of days, group 2 = anchor ("invoice"); the second pattern has no anchor.
+RULE_VALUE_PATTERNS = [r"\bwithin (\d+) days? of (?:the )?([a-z]+)", r"\b(\d+)[- ]day return window\b()"]
+HEADER_SECTION = "document header"   # text above the first "## " heading (not chunked, but still scanned)
 
 
 # Section heading -> citation slug ("POS Card Reader Runbook" -> "pos-card-reader-runbook").
@@ -34,18 +42,72 @@ def split_sections(file_text: str) -> tuple[str, list[tuple[str, str]]]:
     return title, sections
 
 
-# One KB file -> list of chunk dicts {id, text, metadata}; chunk id == citation.
+# Sentence -> rule name for a day value: "return_window_days" if it is about returns, else "days_of_<anchor>".
+def rule_name(sentence: str, anchor: str) -> str:
+    if re.search(r"\breturn|\brefund|\bexchange", sentence, re.IGNORECASE):
+        return "return_window_days"
+    return f"days_of_{anchor}"
+
+
+# Section name + text -> list of (rule, days, section) for every day-rule statement in it.
+def rule_values(section: str, text: str) -> list[tuple[str, int, str]]:
+    found = []
+    for sentence in re.split(r"(?<=[.!?])\s+|\n", text):
+        for pattern in RULE_VALUE_PATTERNS:
+            for match in re.finditer(pattern, sentence, re.IGNORECASE):
+                found.append((rule_name(sentence, match.group(2)), int(match.group(1)), section))
+    return found
+
+
+# Whole KB file text -> {rule: [{"value", "section"}, ...]} for rules stated with 2+ different values.
+# Scans the header too, so a rule written above the first heading is not missed.
+def find_conflicts(file_text: str) -> dict:
+    header = re.split(r"^## ", file_text, maxsplit=1, flags=re.MULTILINE)[0]
+    statements = rule_values(HEADER_SECTION, header)
+    for heading, body in split_sections(file_text)[1]:
+        statements.extend(rule_values(heading, body))
+    by_rule = {}
+    for rule, value, section in statements:
+        by_rule.setdefault(rule, {}).setdefault(value, section)   # first section stating a value
+    return {rule: [{"value": value, "section": section} for value, section in values.items()]
+            for rule, values in by_rule.items() if len(values) > 1}
+
+
+# Source id + conflicts -> one "[CONFLICT] ..." warning line per rule.
+def conflict_warnings(source_id: str, conflicts: dict) -> list[str]:
+    lines = []
+    for rule, values in conflicts.items():
+        stated = ", ".join(f"{item['value']} ({item['section']})" for item in values)
+        lines.append(f"[CONFLICT] {source_id}: {rule} is stated with different values: {stated}")
+    return lines
+
+
+# Scans every KB file and logs a warning per conflicting rule; returns the warning lines (startup check).
+def log_conflicts() -> list[str]:
+    lines = []
+    for path in sorted(config.KB_DIR.glob("*.md")):
+        file_text = path.read_text(encoding="utf-8")
+        lines.extend(conflict_warnings(read_source_id(file_text) or path.name, find_conflicts(file_text)))
+    for line in lines:
+        logger.warning(line)
+    return lines
+
+
+# One KB file -> list of chunk dicts {id, text, metadata}; chunk id == citation. Every chunk carries the
+# document's conflicts as a JSON string (ChromaDB metadata values must be plain strings or numbers).
 def chunk_file(path: Path) -> list[dict]:
     file_text = path.read_text(encoding="utf-8")
     title, sections = split_sections(file_text)
     source_id = read_source_id(file_text)
+    conflicts = json.dumps(find_conflicts(file_text))
     chunks = []
     for heading, body in sections:
         slug = slugify(heading)
         chunks.append({
             "id": f"{path.name}#{slug}",
             "text": f"{title} — {heading}\n{body}",
-            "metadata": {"file": path.name, "section": heading, "slug": slug, "source_id": source_id},
+            "metadata": {"file": path.name, "section": heading, "slug": slug, "source_id": source_id,
+                         "conflicts": conflicts},
         })
     return chunks
 
@@ -69,7 +131,8 @@ def open_collection() -> chromadb.Collection:
 def to_policy_hit(chunk: dict, score: float) -> PolicyHit:
     metadata = chunk["metadata"]
     return PolicyHit(citation=chunk["id"], file=metadata["file"], section=metadata["section"],
-                     source_id=metadata["source_id"], text=chunk["text"], score=round(score, 3))
+                     source_id=metadata["source_id"], text=chunk["text"], score=round(score, 3),
+                     conflicts=json.loads(metadata.get("conflicts") or "{}"))
 
 
 # Lowercase words of 3+ letters, used by the mock keyword-overlap retriever.
