@@ -510,6 +510,56 @@ def returns_summary(days: int = config.QUALITY_WINDOW_DAYS) -> DataResult:
                       data_used=[RETURNS_CSV])
 
 
+# Store id -> one row per SKU with summed PO and received qty (receipts up to ANCHOR), most received first.
+def procurement_totals(store_id: str) -> pd.DataFrame:
+    receipts = before_anchor(load_table("receipts"), "receipt_date")
+    store_receipts = receipts[receipts["store_id"] == store_id]
+    totals = store_receipts.groupby("sku", as_index=False)[["po_qty", "received_qty"]].sum()
+    totals = totals.merge(load_table("product_master")[["sku", "name"]], on="sku", how="left")
+    # SKU as tie-break so equal totals always come out in the same order.
+    return totals.sort_values(["received_qty", "sku"], ascending=[False, True])
+
+
+# Totals table -> top_n plain dicts with Python ints (safe for the JSON evidence pack).
+def procurement_ranking(totals: pd.DataFrame, top_n: int) -> list[dict]:
+    ranking = []
+    for row in totals.head(top_n).to_dict("records"):
+        ranking.append({"sku": row["sku"], "name": row["name"], "po_qty": int(row["po_qty"]),
+                        "received_qty": int(row["received_qty"])})
+    return ranking
+
+
+# Store id + ranking -> summary lines. Says "not customer sales" because the data has no sales records.
+def procurement_lines(store_id: str, ranking: list[dict]) -> list[str]:
+    if not ranking:
+        return [f"No vendor receipts found for {store_id} up to {config.ANCHOR:%Y-%m-%d}."]
+    top = ranking[0]
+    lines = [f"Products {store_id} received from vendors (not customer sales), up to {config.ANCHOR:%Y-%m-%d}: "
+             f"most received is {top['sku']} {top['name']} ({top['received_qty']} received of {top['po_qty']} "
+             f"ordered)."]
+    for row in ranking[1:]:
+        lines.append(f"{row['sku']} {row['name']}: {row['received_qty']} received of {row['po_qty']} ordered.")
+    return lines
+
+
+# Store id -> products the store received most from vendors (vendor receipts, not customer sales).
+def store_procurement_summary(store_id: str, top_n: int = config.PROCUREMENT_TOP_N) -> DataResult:
+    totals = procurement_totals(store_id)
+    ranking = procurement_ranking(totals, top_n)
+    facts = {"store_id": store_id, "source": "vendor receipts (not customer sales)", "sku_count": len(totals),
+             "ranking": ranking}
+    return DataResult(tool="store_procurement_summary", facts=facts, findings=[],
+                      summary_lines=procurement_lines(store_id, ranking), data_used=[RECEIPTS_CSV, PRODUCT_CSV])
+
+
+# Analytics question no tool covers -> a "cannot answer" result that names the data we do have.
+def unsupported_analytics() -> DataResult:
+    line = ("The available data cannot answer this question: it holds support cases, returns and quality "
+            "complaints, vendor receipts, inventory, and product, vendor and store lists, but no customer sales.")
+    return DataResult(tool="unsupported_analytics", facts={}, findings=["unsupported_analytics"],
+                      summary_lines=[line], data_used=[])
+
+
 # --- Returns and pricing tools: 02_pos_pricing_returns_policy.md ------------------------------------
 
 # Refund amount + receipt status -> approval findings (#returns-and-refunds). Policy thresholds, no CSV.
@@ -576,6 +626,11 @@ def run_analytics(triage: TriageResult) -> list[DataResult]:
         return [returns_summary(days)]
     if intent == "stockout_root_cause" and facts.store_id and facts.sku:
         return [stockout_root_cause(facts.store_id, facts.sku)]
+    if intent == "store_procurement_summary" and facts.store_id:
+        return [store_procurement_summary(facts.store_id)]
+    if intent == "other":
+        return [unsupported_analytics()]
+    # Intent known but a needed field is missing: no data, Triage missing_fields drives the follow-up question.
     return []
 
 

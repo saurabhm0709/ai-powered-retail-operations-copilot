@@ -38,7 +38,7 @@ RESPONSE_MAX_TOKENS = 500
 MAX_RETRIES = 2
 RETRY_BACKOFF_SECONDS = 1.0  # wait 1s, then 2s between retries
 MAX_CALLS = 300  # hard budget guard per process (≈ $0.15 at gpt-4o-mini prices)
-PROMPT_VERSION = "v1"  # part of the cache key; bump when prompts change
+PROMPT_VERSION = "v2"  # part of the cache key; bump when prompts change
 
 # --- Flags ---
 MOCK_LLM = env_flag("MOCK_LLM")
@@ -79,6 +79,7 @@ RELATED_CASES_DAYS = 30        # window for related support cases
 CASE_QUERY_DEFAULT_HOURS = 24  # analytics window when the question names none
 CASE_QUERY_PRIORITIES = ["P1", "P2", "P3", "P4"]  # all priorities when the question names none
 MAX_LIST_ITEMS = 5             # cap on ranked lists / evidence rows passed to the answer
+PROCUREMENT_TOP_N = 5          # products listed in a store procurement summary
 
 # --- Retrieval (tuning values, not policy) ---
 RAG_TOP_K = 4
