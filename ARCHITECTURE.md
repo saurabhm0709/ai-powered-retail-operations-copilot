@@ -46,7 +46,8 @@ LLM calls per request: **2** (Triage, Final Response). Everything else is determ
         +-----------------------------+                                             |   |
         v                             v                                             |   |
  [3A] RAG AGENT                  [3B] DATA AGENT                                    |   |
-   ChromaDB + OpenAI embeddings     Pandas tools over the 9 CSVs                    |   |
+   ChromaDB + local                 Pandas tools over the 9 CSVs                    |   |
+   all-MiniLM-L6-v2 embeddings                                                      |   |
    policy chunks = KB sections      stock / receipts / vendor / quality /           |   |
    chunk id == citation             cases / refund / price / root-cause             |   |
         |                             |                                             |   |
