@@ -101,7 +101,6 @@ def retrieve_by_embedding(query_text: str, k: int) -> list[PolicyHit]:
 
 
 # Masked question + category -> policy hits ([] means policy cannot be confirmed).
-# TODO step 2: light boost for the category's home file (ARCHITECTURE.md §6 [3A]).
 def retrieve(masked_query: str, category: str, k: int = config.RAG_TOP_K) -> list[PolicyHit]:
     query_text = f"{masked_query} | category: {category}"
     if config.MOCK_LLM:

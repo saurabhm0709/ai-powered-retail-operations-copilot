@@ -339,8 +339,8 @@ continue normally (`blocked=False`, `pii_masked=True`). The user *requesting* re
 
 **Retrieval (`retrieve(query, category, k=RAG_TOP_K) -> list[PolicyHit]`):**
 - Query text = masked question + " | category: " + category.
-- Keep hits with distance ≤ `RAG_MAX_DISTANCE`; light boost for chunks whose file matches the category's home file
-  (POS/Pricing/Returns → 02, Inventory → 03, Vendor/Quality → 04, Security → 05, Analytics → 01).
+- Keep hits with distance ≤ `RAG_MAX_DISTANCE`. No per-category file boost: the category is already in the query
+  text, and rule/data-tool citations come first in the final list, so citation recall meets target without it.
 - If no hit passes → return [] and the response must say it cannot confirm policy from available documents.
 - `MOCK_LLM`: keyword overlap scoring over the same chunks.
 - `get_section(citation)` returns full text (used by the UI to show the cited passage and by the responder).
