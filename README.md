@@ -26,8 +26,7 @@ streamlit run app.py
   cached on disk, so re-running the same input is free, and a hard call budget (`MAX_CALLS` in `copilot/config.py`)
   stops a run that would overspend.
 - Embeddings are local (ChromaDB's default `all-MiniLM-L6-v2`), so building the index costs nothing.
-- `run_eval.py --out-dir DIR` writes results to another folder; the Streamlit Evaluation tab uses this so its
-  re-run button never overwrites `outputs/`.
+- `run_eval.py --out-dir DIR` writes results to another folder, so a trial run never overwrites `outputs/`.
 
 ## Architecture
 
