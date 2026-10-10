@@ -89,6 +89,13 @@ def apply_priority_mode(winner: dict, triage: TriageResult) -> dict:
             "reason": f"LLM-suggested priority (comparison mode); rules chose {winner['id']}."}
 
 
+# Low confidence and only the catch-all P3-DEFAULT fired -> True. Retrieved sections then matched words in
+# a vague question, not a confirmed policy (05_responsible_ai_policy.md#uncertainty), so they are not cited.
+def policy_unconfirmed(triage: TriageResult, selected_rules: list[dict]) -> bool:
+    only_default = [rule["id"] for rule in selected_rules] == ["P3-DEFAULT"]
+    return only_default and triage.confidence < config.CONFIDENCE_ESCALATION
+
+
 # Safety + triage + hits + data -> Decision: final priority by rules, escalation from the matrix rows of
 # the deciding rules, citations from rules + data tools + retrieval, and the mock workflow payload.
 def decide(safety: SafetyCheck, triage: TriageResult, hits: list[PolicyHit],
@@ -97,11 +104,14 @@ def decide(safety: SafetyCheck, triage: TriageResult, hits: list[PolicyHit],
     winner = apply_priority_mode(selected[0], triage)
     triggers = [rule["trigger"] for rule in selected if rule["trigger"]]
     escalation = rules.build_escalation(triggers, triage.confidence, winner["priority"], blocked=False)
-    allowed = ordered_citations(selected, data_results, hits)
+    unconfirmed = policy_unconfirmed(triage, selected)
+    # Unconfirmed: keep only the rule citation (no retrieved-only or data-tool citations).
+    allowed = ordered_citations(selected, [], []) if unconfirmed else ordered_citations(selected, data_results, hits)
     payload = workflow.build_payload(safety, triage, winner["priority"], winner["id"], winner["reason"],
                                      escalation, data_results)
     return Decision(
         priority=winner["priority"], rule_id=winner["id"], priority_reason=winner["reason"],
         fired_rule_ids=[rule["id"] for rule in selected], allowed_citations=allowed,
         citations=allowed[:config.MAX_CITATIONS], escalation=escalation, workflow_payload=payload,
+        policy_confirmed=not unconfirmed,
     )

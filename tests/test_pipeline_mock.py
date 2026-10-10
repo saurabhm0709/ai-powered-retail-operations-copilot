@@ -68,7 +68,7 @@ def test_extract_facts_from_text():
 
 
 def test_ambiguous_mention_gives_candidates_and_missing_sku():
-    result = triage.triage(safety.check_input("Customer at ST004 asks about a treadmill they bought."), None, None)
+    result = triage.triage(safety.check_input("Stock check at ST004: do we still have the treadmill?"), None, None)
     assert result.facts.sku is None
     assert result.facts.sku_candidates[0] == "SKU5002"   # core product offered first
     assert len(result.facts.sku_candidates) == 3
@@ -182,3 +182,43 @@ def test_short_shipment_gives_vendor_claim_draft_not_a_submitted_claim():
     response = orchestrator.run("English Willow Cricket Bat stock is empty at ST002, what went wrong?")
     assert response.workflow_payload["type"] == "vendor_claim_draft"
     assert response.workflow_payload["status"] in ("OPEN", "PENDING_HUMAN_APPROVAL")
+
+
+def test_return_with_amount_and_receipt_does_not_ask_for_sku():
+    result = triage.triage(safety.check_input(
+        "Shopper at ST011 returns an unopened treadmill with the bill, INR 3,000."), None, None)
+    assert result.category == "Returns and Refunds"
+    assert result.facts.sku_candidates            # the product is ambiguous ...
+    assert "sku" not in result.missing_fields     # ... but a return is decided without it
+
+
+def test_quality_case_with_ambiguous_product_still_asks_for_sku():
+    result = triage.triage(safety.check_input("The treadmill belt at ST011 shows a split seam."), None, None)
+    assert result.category == "Product Quality and Safety"
+    assert "sku" in result.missing_fields
+
+
+def test_low_confidence_vague_request_gets_generic_follow_up_and_rule_citation_only(monkeypatch):
+    # Mock triage always reports 0.7, so the low LLM confidence comes from a fake triage output.
+    output = fake_llm_output("Other or Security").model_copy(update={"llm_confidence": 0.5})
+    monkeypatch.setattr(triage.llm, "structured",
+                        lambda system, user, schema, max_tokens: (output, {}) if schema is TriageLLMOutput else (None, {}))
+    response = orchestrator.run("Something odd going on here, can someone look?")
+    assert response.confidence < config.CONFIDENCE_ESCALATION
+    assert response.priority_rule_id == "P3-DEFAULT"
+    assert response.follow_up_question == responder.GENERIC_FOLLOW_UP
+    assert response.citations == ["01_retail_operations_sop.md#priority-rules"]
+    assert responder.UNCONFIRMED_POLICY_LINE in response.answer
+    assert response.escalation.required and response.escalation.team == "Store Manager"
+
+
+def test_confident_request_without_missing_fields_has_no_follow_up():
+    response = orchestrator.run("Card reader on register 3 at ST020 rejects every tap; other registers work.")
+    assert response.follow_up_question is None
+
+
+def test_p1_answer_gives_guidance_before_the_follow_up():
+    response = orchestrator.run("A customer was injured by a snapping Hockey Stick at the demo area.")
+    assert response.priority == "P1"
+    assert response.answer.startswith(responder.P1_GUIDANCE)   # guidance first in the answer ...
+    assert response.follow_up_question != response.answer     # ... the question is a separate field

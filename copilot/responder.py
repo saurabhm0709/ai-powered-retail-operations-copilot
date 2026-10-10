@@ -8,6 +8,12 @@ from copilot.schemas import (CopilotResponse, DataResult, Decision, PolicyHit, R
                              TriageResult)
 
 NO_POLICY_LINE = "I cannot confirm the policy for this from the available documents."
+UNCONFIRMED_POLICY_LINE = "I can't confirm which policy applies from this question alone."
+# Asked when confidence is low but no specific field is missing (05_responsible_ai_policy.md#uncertainty).
+GENERIC_FOLLOW_UP = ("Can you tell me what is happening, where it is happening (store id, register or area), "
+                     "and which product is involved?")
+# P1 template fallback opens with immediate safe guidance before anything else (ARCHITECTURE.md §6 [5]).
+P1_GUIDANCE = "Immediate action: keep people safe, stop using the affected item or process, and escalate now."
 MAX_POLICY_STEPS = 3
 MAX_POLICY_SECTIONS = 6       # sections sent to the LLM (allowed citations, rule ones first)
 SECTION_CHARS = 900           # policy sections are short; this trims only the longest ones
@@ -56,14 +62,24 @@ def follow_up_for(missing_fields: list[str]) -> str | None:
     return None
 
 
+# Code decides whether a follow-up is asked: a critical field is missing, or confidence is below the
+# escalation threshold (then a generic "what / where / which" question unless the draft has one).
+def choose_follow_up(draft_question: str | None, triage: TriageResult) -> str | None:
+    if triage.missing_fields:
+        return draft_question or follow_up_for(triage.missing_fields)
+    if triage.confidence < config.CONFIDENCE_ESCALATION:
+        return draft_question or GENERIC_FOLLOW_UP
+    return None
+
+
 # Decision + hits + data -> template answer text (mock mode and the fallback when the LLM fails).
 def template_answer(triage: TriageResult, hits: list[PolicyHit], data_results: list[DataResult],
                     decision: Decision) -> str:
-    sentences = [f"Classified as {triage.category}, priority {decision.priority}."]
-    if hits:
-        sentences.append(f"Relevant policy: {hits[0].section}.")
-    else:
-        sentences.append(NO_POLICY_LINE)
+    sentences = [P1_GUIDANCE] if decision.priority == "P1" else []
+    sentences.append(f"Classified as {triage.category}, priority {decision.priority}.")
+    # When the policy is unconfirmed, compose() adds UNCONFIRMED_POLICY_LINE instead.
+    if decision.policy_confirmed:
+        sentences.append(f"Relevant policy: {hits[0].section}." if hits else NO_POLICY_LINE)
     for result in data_results:
         sentences.extend(result.summary_lines[:2])
     if decision.escalation.required:
@@ -121,7 +137,8 @@ def llm_draft(safety_check: SafetyCheck, triage: TriageResult, data_results: lis
 def template_draft(triage: TriageResult, hits: list[PolicyHit], data_results: list[DataResult],
                    decision: Decision) -> ResponseLLMOutput:
     return ResponseLLMOutput(answer=template_answer(triage, hits, data_results, decision),
-                             next_actions=policy_steps(hits), follow_up_question=follow_up_for(triage.missing_fields),
+                             next_actions=policy_steps(hits) if decision.policy_confirmed else [],
+                             follow_up_question=None,
                              citations=[])
 
 
@@ -131,17 +148,19 @@ def compose(safety_check: SafetyCheck, triage: TriageResult, hits: list[PolicyHi
     draft = llm_draft(safety_check, triage, data_results, decision)
     if draft is None:
         draft = template_draft(triage, hits, data_results, decision)
-    # Code decides whether a follow-up is asked: only when a critical field is missing.
-    follow_up = (draft.follow_up_question or follow_up_for(triage.missing_fields)) if triage.missing_fields else None
+    answer, limitations = draft.answer, None if hits else NO_POLICY_LINE
+    if not decision.policy_confirmed:
+        answer, limitations = f"{answer} {UNCONFIRMED_POLICY_LINE}", UNCONFIRMED_POLICY_LINE
     data_used = []
     for result in data_results:
         data_used.extend(name for name in result.data_used if name not in data_used)
     return CopilotResponse(
         trace_id="", mode=triage.mode, category=triage.category, priority=decision.priority,
         priority_rule_id=decision.rule_id, priority_reason=decision.priority_reason,
-        confidence=triage.confidence, answer=draft.answer, next_actions=draft.next_actions,
-        follow_up_question=follow_up, citations=final_citations(decision, draft.citations),
+        confidence=triage.confidence, answer=answer, next_actions=draft.next_actions,
+        follow_up_question=choose_follow_up(draft.follow_up_question, triage),
+        citations=final_citations(decision, draft.citations),
         data_used=data_used, data_findings={result.tool: result.findings for result in data_results},
         escalation=decision.escalation, pii_masked=bool(safety_check.pii_found), safety_refusal=False,
-        workflow_payload=decision.workflow_payload, limitations=None if hits else NO_POLICY_LINE,
+        workflow_payload=decision.workflow_payload, limitations=limitations,
     )

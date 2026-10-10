@@ -102,6 +102,9 @@ SAFETY_SIGNALS = [("injury", r"injur|hurt|bleed"), ("recall", r"recall"),
 CRITICAL_FIELDS = {"Inventory and Replenishment": ["store_id", "sku"],
                    "Returns and Refunds": ["amount_inr", "receipt_present"],
                    "Pricing and Promotions": ["sku"]}
+# Categories whose Data Agent tools need one SKU (stock, receipts, price, quality complaints for that product).
+SKU_FOLLOW_UP_CATEGORIES = {"Inventory and Replenishment", "Pricing and Promotions", "Vendor and Supply Chain",
+                            "Product Quality and Safety"}
 
 DATA_CATEGORIES = {"Inventory and Replenishment", "Vendor and Supply Chain",
                    "Product Quality and Safety", "Returns and Refunds"}
@@ -259,8 +262,9 @@ def find_missing_fields(category: str, facts: Facts) -> list[str]:
     for field in CRITICAL_FIELDS.get(category, []):
         if getattr(facts, field) is None:
             missing.append(field)
-    # An ambiguous product needs a follow-up in every category (ARCHITECTURE.md §6 [2] step 3).
-    if facts.sku_candidates and "sku" not in missing:
+    # An ambiguous product needs a follow-up only where the SKU drives the data checks (ARCHITECTURE.md §6 [2]
+    # steps 3-4). A return with amount and receipt status is decided without it, so it must not ask.
+    if facts.sku_candidates and category in SKU_FOLLOW_UP_CATEGORIES and "sku" not in missing:
         missing.append("sku")
     return missing
 

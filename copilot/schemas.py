@@ -135,6 +135,7 @@ class Decision(BaseModel):
     citations: list[str]           # final list: rule citations first, then retrieved, max 4
     escalation: Escalation
     workflow_payload: dict | None
+    policy_confirmed: bool = True  # False: low confidence and only the catch-all rule fired
 
 
 # Final Response LLM structured output; validated by safety.check_output before use.
