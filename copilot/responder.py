@@ -12,6 +12,8 @@ from copilot.schemas import (CopilotResponse, DataResult, Decision, PolicyHit, R
 logger = logging.getLogger(__name__)
 NO_POLICY_LINE = "I cannot confirm the policy for this from the available documents."
 UNCONFIRMED_POLICY_LINE = "I can't confirm which policy applies from this question alone."
+# Data was needed but no tool returned any; said plainly so the answer never implies numbers were checked.
+NO_DATA_LINE = "The data needed to answer this is not available in the store records, so no figures are given."
 # Asked when confidence is low but no specific field is missing (05_responsible_ai_policy.md#uncertainty).
 GENERIC_FOLLOW_UP = ("Can you tell me what is happening, where it is happening (store id, register or area), "
                      "and which product is involved?")
@@ -147,6 +149,9 @@ def template_answer(triage: TriageResult, hits: list[PolicyHit], data_results: l
         sentences.append(f"Relevant policy: {hits[0].section}." if hits else NO_POLICY_LINE)
     for result in data_results:
         sentences.extend(result.summary_lines[:2])
+    # Missing fields are handled by the follow-up question instead: the data may exist once they are given.
+    if triage.needs_data and not data_results and not triage.missing_fields:
+        sentences.append(NO_DATA_LINE)
     if decision.escalation.required:
         sentences.append(f"Escalate to {decision.escalation.team}.")
     return " ".join(sentences)
