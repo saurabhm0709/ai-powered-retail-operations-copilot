@@ -4,7 +4,7 @@ import re
 
 from copilot import config
 from copilot.data_store import load_table
-from copilot.schemas import Category, Escalation, TriageResult
+from copilot.schemas import Category, DataResult, Escalation, TriageResult
 
 # Checked in order; first match wins. Order follows the SOP tie-break "choose the category linked to the
 # immediate risk" (01_retail_operations_sop.md#service-categories): safety before pricing before POS, etc.
@@ -40,8 +40,9 @@ def build_escalation(triggers: list[str], confidence: float, priority: str, bloc
     rows = [matrix_row(trigger) for trigger in triggers]
     teams = []
     for row in rows:
-        if row["team"] not in teams:
-            teams.append(row["team"])
+        for team in row["team"].split(" + "):  # matrix cells combine teams, e.g. "Security + POS Support"
+            if team not in teams:
+                teams.append(team)
     approval = any(row["human_approval_required"] for row in rows)
     low_confidence = confidence < config.CONFIDENCE_ESCALATION
     if low_confidence and not teams:
@@ -56,8 +57,148 @@ def build_escalation(triggers: list[str], confidence: float, priority: str, bloc
     )
 
 
-# Triage + data results -> (priority, rule_id). PLACEHOLDER until the full ordered rule table (step 2).
-def decide_priority(triage: TriageResult, data_results: list) -> tuple[str, str]:
-    if triage.mode in ("analytics", "policy_question"):
-        return "P4", "P4-ANALYTICS"
-    return "P3", "P3-DEFAULT"
+SOP = "01_retail_operations_sop.md"
+POS = "02_pos_pricing_returns_policy.md"
+INV = "03_inventory_replenishment_policy.md"
+VQ = "04_vendor_quality_policy.md"
+RAI = "05_responsible_ai_policy.md"
+
+MULTI_REGISTER_SCOPES = {"multiple_registers", "all_registers", "one_store"}
+MULTI_PRICING_SCOPES = {"many_skus", "department", "many_customers", "multiple_stores"}
+
+# Priority rules, ordered, first match wins (ARCHITECTURE.md §6 [4b], 01_retail_operations_sop.md#priority-rules).
+# P1-SECURITY and P1-PAYMENT-DATA are decided by the input gate (controller.refusal), so they are not here.
+# when(triage, findings, high_demand) -> bool. "trigger" is the escalation_matrix row (None = no row).
+PRIORITY_RULES = [
+    {"id": "P1-SAFETY", "priority": "P1",
+     "when": lambda t, f, hd: t.facts.safety_signal != "none" or "safety_incident" in f,
+     "citations": [f"{VQ}#recall-and-safety", f"{SOP}#priority-rules"],
+     "trigger": "Contamination, injury, recall, or unsafe equipment",
+     "reason": "Possible injury, recall or unsafe equipment is P1."},
+    {"id": "P1-POS-OUTAGE", "priority": "P1",
+     "when": lambda t, f, hd: t.category == "POS and Payments" and t.facts.scope in MULTI_REGISTER_SCOPES,
+     "citations": [f"{POS}#pos-card-reader-runbook", f"{SOP}#priority-rules"],
+     "trigger": "Multiple registers or store-wide payment outage",
+     "reason": "Multiple registers or a store-wide payment outage is P1."},
+    {"id": "P2-STOCKOUT", "priority": "P2",
+     "when": lambda t, f, hd: "stockout_high_demand" in f or ("stockout" in f and t.facts.order_context != "none"),
+     "citations": [f"{INV}#stock-outs-and-replenishment"],
+     "trigger": "High-demand SKU stock-out or false availability",
+     "reason": "Stock-out of a high-demand item or for a confirmed order is P2."},
+    {"id": "P2-STOCKOUT", "priority": "P2",
+     "when": lambda t, f, hd: "warehouse_depleted" in f,
+     "citations": [f"{INV}#stock-outs-and-replenishment", f"{INV}#root-cause-hints"],
+     "trigger": "Warehouse stock depleted for high-demand or academy-order item",
+     "reason": "Warehouse stock is depleted for this item, which is P2."},
+    {"id": "P2-SHORT-SHIPMENT", "priority": "P2",
+     "when": lambda t, f, hd: ("short_shipment" in f and hd) or "consecutive_short_shipment" in f,
+     "citations": [f"{VQ}#short-shipments"],
+     "trigger": "Repeated or below-90-percent short shipment",
+     "reason": "Short shipment below 90% on a high-demand item, or repeated short shipments, is P2."},
+    {"id": "P2-PRICING-MULTI", "priority": "P2",
+     "when": lambda t, f, hd: t.category == "Pricing and Promotions" and t.facts.scope in MULTI_PRICING_SCOPES,
+     "citations": [f"{POS}#pricing-and-promotions"],
+     "trigger": "Department or multi-customer pricing mismatch",
+     "reason": "A pricing mismatch affecting many SKUs, customers or stores is P2."},
+    {"id": "P2-QUALITY-REPEATED", "priority": "P2",
+     "when": lambda t, f, hd: t.category == "Product Quality and Safety"
+                              and (t.facts.repeated or t.facts.multi_store or "repeated_quality_complaints" in f),
+     "citations": [f"{VQ}#product-quality-complaints"],
+     "trigger": "Repeated quality complaints without immediate safety risk",
+     "reason": "Repeated or multi-store quality complaints without immediate safety risk are P2."},
+    {"id": "P2-REFUND-APPROVAL", "priority": "P2",
+     "when": lambda t, f, hd: "refund_needs_approval" in f,
+     "citations": [f"{POS}#returns-and-refunds", f"{RAI}#human-in-the-loop"],
+     "trigger": "No-receipt or high-value refund threshold",
+     "reason": "The refund is above an approval threshold, so it needs manager approval (P2)."},
+    {"id": "P2-DISCREPANCY", "priority": "P2",
+     "when": lambda t, f, hd: "inventory_discrepancy" in f and hd,
+     "citations": [f"{INV}#inventory-discrepancy"],
+     "trigger": "High-demand SKU stock-out or false availability",
+     "reason": "An inventory discrepancy on a high-demand item is P2."},
+    {"id": "P3-POS-SINGLE", "priority": "P3",
+     "when": lambda t, f, hd: t.category == "POS and Payments" and t.facts.scope == "one_register",
+     "citations": [f"{POS}#pos-card-reader-runbook"],
+     "trigger": "One register or one card reader failing",
+     "reason": "One register or card reader failing while others work is P3."},
+    # The next three also require mode "triage": a returns/pricing/service *analytics* question is P4, not P3.
+    {"id": "P3-PRICING-SINGLE", "priority": "P3",
+     "when": lambda t, f, hd: t.category == "Pricing and Promotions" and t.mode == "triage",
+     "citations": [f"{POS}#pricing-and-promotions"],
+     "trigger": "Single SKU shelf-vs-register mismatch",
+     "reason": "A single-SKU shelf-vs-register mismatch is P3."},
+    {"id": "P3-INVENTORY-ROUTINE", "priority": "P3",
+     "when": lambda t, f, hd: "below_reorder" in f or "inventory_discrepancy" in f,
+     "citations": [f"{INV}#inventory-discrepancy"],
+     "trigger": "Routine reorder or cycle count",
+     "reason": "Below reorder point or a routine count discrepancy is P3."},
+    {"id": "P3-RETURN-STANDARD", "priority": "P3",
+     "when": lambda t, f, hd: t.category == "Returns and Refunds" and t.mode == "triage",
+     "citations": [f"{POS}#returns-and-refunds"],
+     "trigger": None,
+     "reason": "A standard return within policy limits is P3."},
+    {"id": "P3-SERVICE", "priority": "P3",
+     "when": lambda t, f, hd: t.category == "Customer Service" and t.mode == "triage",
+     "citations": [f"{POS}#customer-recovery"],
+     "trigger": "Routine service recovery",
+     "reason": "Routine customer service recovery is P3."},
+    {"id": "P4-ANALYTICS", "priority": "P4",
+     "when": lambda t, f, hd: t.mode in ("analytics", "policy_question"),
+     "citations": [f"{SOP}#analytics-rule"],
+     "trigger": "General inquiry or analytics",
+     "reason": "An analytics or general question with no active incident is P4."},
+    {"id": "P3-DEFAULT", "priority": "P3",
+     "when": lambda t, f, hd: True,
+     "citations": [f"{SOP}#priority-rules"],
+     "trigger": None,
+     "reason": "An active issue with no specific rule defaults to P3."},
+]
+
+
+# Data results -> set of all finding codes.
+def all_findings(data_results: list[DataResult]) -> set[str]:
+    findings = set()
+    for result in data_results:
+        findings.update(result.findings)
+    return findings
+
+
+# Data results -> True if any tool reported the SKU as high-demand (facts["high_demand"]).
+def is_high_demand(data_results: list[DataResult]) -> bool:
+    return any(result.facts.get("high_demand") is True for result in data_results)
+
+
+# Triage + data -> every rule whose condition holds, in table order (winner first).
+def fired_rules(triage: TriageResult, data_results: list[DataResult]) -> list[dict]:
+    findings = all_findings(data_results)
+    high_demand = is_high_demand(data_results)
+    fired = []
+    for rule in PRIORITY_RULES:
+        if rule["when"](triage, findings, high_demand):
+            fired.append(rule)
+    return fired
+
+
+# Triage + data -> (priority, rule_id) of the first matching rule. Same function for preliminary and final.
+def decide_priority(triage: TriageResult, data_results: list[DataResult]) -> tuple[str, str]:
+    winner = fired_rules(triage, data_results)[0]
+    return winner["priority"], winner["id"]
+
+
+# Fired rules -> winner + other P1/P2 rules. Lower fired rules (e.g. P3-DEFAULT) add no escalation or citation.
+def deciding_rules(fired: list[dict]) -> list[dict]:
+    selected = [fired[0]]
+    for rule in fired[1:]:
+        if rule["priority"] in ("P1", "P2") and rule not in selected:
+            selected.append(rule)
+    return selected
+
+
+# LLM confidence -> calibrated confidence (ARCHITECTURE.md §6 [2] step 4; 05_responsible_ai_policy.md#uncertainty).
+def calibrate_confidence(llm_confidence: float, llm_category: str, keyword_cat: str,
+                         missing_fields: list[str]) -> float:
+    confidence = llm_confidence
+    if llm_category != keyword_cat:
+        confidence -= 0.20
+    confidence -= min(0.10 * len(missing_fields), 0.20)
+    return round(max(0.0, min(1.0, confidence)), 2)
