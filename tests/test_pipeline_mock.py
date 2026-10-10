@@ -67,6 +67,27 @@ def test_extract_facts_from_text():
     assert facts.sku == "SKU5003"
 
 
+@pytest.mark.parametrize("text, amount", [
+    ("refund of INR 24,999 asked", 24999.0), ("cust wants money back, amt 1499", 1499.0),
+    ("bike approx 18k, wants refund", 18000.0), ("paid 1,499 rs for the bat", 1499.0),
+    ("price was 799/- only", 799.0), ("Rs 2.5k return", 2500.0), ("register 4 kiosk is down", None),
+])
+def test_amount_formats(text, amount):
+    assert triage.extract_amount(text) == amount
+
+
+@pytest.mark.parametrize("text, signal", [
+    ("treadmill making burning smell n smoke", "unsafe_equipment"),
+    ("dumbell rack wobbly, might fall on someone", "unsafe_equipment"),
+    ("customer cut his toe on a nail inside the shoe", "injury"),
+    ("kid got finger stuck in the rowing machine", "injury"),
+    ("power cut since morning, card stuck in reader", "none"),
+    ("price cut on cricket bats not showing at till", "none"),
+])
+def test_safety_words(text, signal):
+    assert triage.extract_safety_signal(text) == signal
+
+
 def test_ambiguous_mention_gives_candidates_and_missing_sku():
     result = triage.triage(safety.check_input("Stock check at ST004: do we still have the treadmill?"), None, None)
     assert result.facts.sku is None

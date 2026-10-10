@@ -94,9 +94,20 @@ ANALYTICS_INTENTS: list[tuple[AnalyticsIntent, str]] = [
     ("open_cases_window", r"incident|case|ticket|unresolved|open"),
 ]
 
-SAFETY_SIGNALS = [("injury", r"injur|hurt|bleed"), ("recall", r"recall"),
-                  ("unsafe_equipment", r"unsafe|hazard|sparking|electric shock"),
+# 04_vendor_quality_policy.md#recall-and-safety. "cut" and "stuck" need a body word, so "price cut",
+# "power cut" and "card stuck in reader" do not count as injuries.
+SAFETY_SIGNALS = [("injury", r"injur|hurt|bleed|\bcut (?:his|her|their|my|a)\b"
+                             r"|\b(?:finger|hand|toe|foot|arm|leg)s? (?:got )?(?:stuck|trapped|caught)"),
+                  ("recall", r"recall"),
+                  ("unsafe_equipment", r"unsafe|hazard|sparking|electric shock|\bsmok(?:e|ing)\b|burning smell"
+                                       r"|smell of burning|\b(?:on|caught) fire\b|wobbl|(?:might|could|about to) fall"),
                   ("equipment_malfunction", r"malfunction|belt slip|stopped suddenly")]
+# Amount formats seen in store messages, tried in order: "INR 1,499" / "Rs 18k", "1499 rs" / "1499/-",
+# "amt 1499", then a bare "18k" (staff shorthand for thousands). Group 2 is the optional "k".
+AMOUNT_PATTERNS = [r"(?:INR|Rs\.?|₹)\s?(\d[\d,]*(?:\.\d+)?)\s?(k)?\b",
+                   r"\b(\d[\d,]*(?:\.\d+)?)\s?(k)?\s?(?:INR|Rs\b|rupees|/-)",
+                   r"\b(?:amt|amount|worth)\s*(?:of|is|was|:|=)?\s*(\d[\d,]*(?:\.\d+)?)\s?(k)?\b",
+                   r"\b(\d+(?:\.\d+)?)\s?(k)\b"]
 
 # Critical fields per category (01_retail_operations_sop.md#minimum-triage-fields).
 CRITICAL_FIELDS = {"Inventory and Replenishment": ["store_id", "sku"],
@@ -127,10 +138,14 @@ def extract_register_id(text: str) -> str | None:
     return f"REG-{int(match.group(1)):02d}" if match else None
 
 
-# Text -> first INR/Rs amount as float ("INR 24,999" -> 24999.0), else None.
+# Text -> first amount as float ("INR 24,999" -> 24999.0, "amt 1499" -> 1499.0, "18k" -> 18000.0), else None.
 def extract_amount(text: str) -> float | None:
-    match = re.search(r"(?:INR|Rs\.?|₹)\s?([\d,]+(?:\.\d+)?)", text, re.IGNORECASE)
-    return float(match.group(1).replace(",", "")) if match else None
+    for pattern in AMOUNT_PATTERNS:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            amount = float(match.group(1).replace(",", ""))
+            return amount * 1000 if match.group(2) else amount
+    return None
 
 
 # Text -> every INR/Rs amount in order ("shelf INR 899 but POS INR 1099" -> [899.0, 1099.0]).
