@@ -32,6 +32,9 @@ RULES:
 - Defects, cracks, split seams, injury, recall or unsafe equipment are Product Quality and Safety.
 - Questions asking for lists, counts, rankings or trends are mode "analytics". If about cases in general,
   category "Other or Security"; if about one domain (e.g. vendor quality complaints), that domain's category.
+- Questions about which products a store ordered or received most (or least) from vendors are mode "analytics",
+  category Vendor and Supply Chain, analytics_intent store_procurement_summary. The data has vendor receipts
+  only, no customer sales: a question about what customers bought or sold most is analytics_intent other.
 - A question about what the policy says, with no live incident, is mode "policy_question". Otherwise "triage".
 - Customer phone/card details inside a return request do not change the category: still Returns and Refunds.
 - Masked values like ******3210 or [REDACTED_CARD] are already safe; ignore them.
@@ -81,6 +84,13 @@ EXAMPLES (input -> key fields):
 # Analytics questions ask about many cases at once, not one live issue.
 ANALYTICS_PATTERN = r"\b(how many|which vendor|which store|grouped by|group by|show (all|unresolved|open)|list (all|open)" \
                     r"|top \d+|trend|summar(y|ise|ize))\b"
+# Ranking questions: a ranking word tied to a quantity verb ("received the most", "most purchased", "rank").
+# A bare "most" is not enough: "most registers are down" is a live incident, not analytics.
+QUANTITY_VERB = r"(?:buy|bought|order|receiv|purchas|sell|sold|return)\w*"
+RANKING_PATTERN = rf"\b{QUANTITY_VERB}(?: \w+){{0,3}} (?<!at )(?:the )?(?:most|least)\b" \
+                  r"(?! of (?:the|their|our|its|these|those|them|it)\b)" \
+                  r"|\b(?:most|least|highest|lowest)[- ](?:bought|ordered|received|purchased|sold|returned)\b" \
+                  r"|\b(?:highest|lowest|most|least) (?:number|count|quantity|qty|volume)\b|\brank(?:ed|ing|s)?\b"
 # Asking what the policy says, with no live incident (01_retail_operations_sop.md#priority-rules: P4).
 POLICY_QUESTION_PATTERN = r"\b(what is|what's|what does) (our|the) (policy|rule|process)\b|\bpolicy (on|for)\b"
 
@@ -89,6 +99,8 @@ ANALYTICS_INTENTS: list[tuple[AnalyticsIntent, str]] = [
     ("vendor_quality_ranking", r"vendor.*(quality|complaint)|(quality|complaint).*vendor"),
     ("quality_trend", r"quality|complaint|defect"),
     ("short_shipments", r"short ship|received less"),
+    # Vendor receipts only; "purchased by customers" (sales) is not in the data, so it falls through to "other".
+    ("store_procurement_summary", r"(from|by) (the )?(vendor|supplier)s?|receiv|procur|purchase order|\bordered\b"),
     ("returns_summary", r"return|refund"),
     ("inventory_below_reorder", r"reorder|below"),
     ("open_cases_window", r"incident|case|ticket|unresolved|open"),
@@ -263,7 +275,7 @@ def detect_mode(text: str) -> tuple[str, AnalyticsIntent | None]:
     lowered = text.lower()
     if re.search(POLICY_QUESTION_PATTERN, lowered):
         return "policy_question", None
-    if not re.search(ANALYTICS_PATTERN, lowered):
+    if not (re.search(ANALYTICS_PATTERN, lowered) or re.search(RANKING_PATTERN, lowered)):
         return "triage", None
     for intent, pattern in ANALYTICS_INTENTS:
         if re.search(pattern, lowered):
@@ -271,8 +283,11 @@ def detect_mode(text: str) -> tuple[str, AnalyticsIntent | None]:
     return "analytics", "other"
 
 
-# Category + facts -> list of missing critical field names (drives the follow-up question).
-def find_missing_fields(category: str, facts: Facts) -> list[str]:
+# Category + facts (+ analytics intent) -> list of missing critical field names (drives the follow-up question).
+def find_missing_fields(category: str, facts: Facts, analytics_intent: AnalyticsIntent | None = None) -> list[str]:
+    # A store procurement summary needs the store and nothing else (no SKU follow-up).
+    if analytics_intent == "store_procurement_summary":
+        return [] if facts.store_id else ["store_id"]
     missing = []
     for field in CRITICAL_FIELDS.get(category, []):
         if getattr(facts, field) is None:
@@ -295,7 +310,7 @@ def needs_data_for(mode: str, category: str, facts: Facts) -> bool:
 # Shared by the LLM path and the keyword path so both are finished by the same rules.
 def finish_triage(mode: str, category: str, llm_confidence: float, keyword_cat: str, facts: Facts,
                   analytics_intent: AnalyticsIntent | None, short_reasoning: str) -> TriageResult:
-    missing_fields = find_missing_fields(category, facts)
+    missing_fields = find_missing_fields(category, facts, analytics_intent)
     confidence = rules.calibrate_confidence(llm_confidence, category, keyword_cat, missing_fields)
     result = TriageResult(
         mode=mode, category=category, llm_confidence=llm_confidence, confidence=confidence,
