@@ -1,0 +1,23 @@
+# secrets
+.env
+
+# caches and indexes (rebuilt locally)
+.cache/
+.chroma/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# virtual environments
+.venv/
+venv/
+
+# generated outputs (keep only the demo samples)
+outputs/*
+!outputs/predictions.csv
+!outputs/metrics.md
+
+# editors / OS
+.vscode/
+.idea/
+.DS_Store
