@@ -1,27 +1,21 @@
 # secrets
 .env
 
-# caches and indexes (rebuilt locally)
+# generated / heavy
 .cache/
 .chroma/
 __pycache__/
 *.pyc
 .pytest_cache/
-
-# virtual environments
 .venv/
 venv/
 
-# generated outputs (keep only the demo samples)
+# outputs: ignore everything except demo samples
 outputs/*
 !outputs/predictions.csv
 !outputs/metrics.md
 
-# editors / OS
-.vscode/
-.idea/
+# OS / editor
 .DS_Store
-.env
-.cache/
-.chroma/
-__pycache__/
+.vscode/
+.ipynb_checkpoints/
