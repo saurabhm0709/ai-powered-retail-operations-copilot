@@ -304,3 +304,24 @@ def test_p1_llm_answer_gets_safe_guidance_prepended(monkeypatch):
     response = orchestrator.run("A customer was injured when a treadmill belt slipped at ST012.")
     assert response.priority == "P1"
     assert response.answer == f"{responder.P1_GUIDANCE} Escalate to the quality P1 queue."
+
+
+def test_procurement_question_ranks_vendor_receipts_at_p4():
+    response = orchestrator.run("Which items did ST006 receive the most of from its vendors?")
+    assert (response.mode, response.priority) == ("analytics", "P4")
+    assert "receipts.csv" in response.data_used
+    assert "not customer sales" in response.answer
+
+
+def test_customer_sales_question_abstains_without_numbers():
+    response = orchestrator.run("What did customers buy the most at ST004 last week?")
+    assert response.priority == "P4"
+    assert response.data_used == []
+    assert "no customer sales" in response.answer
+    assert not any(char.isdigit() for char in response.answer.replace("ST004", "").replace("P4", ""))
+
+
+def test_most_registers_down_is_still_an_incident_not_analytics():
+    response = orchestrator.run("Most registers at ST003 cannot process card payments.")
+    assert response.mode == "triage"
+    assert response.priority != "P4"

@@ -143,6 +143,36 @@ def test_false_availability_only_when_shelf_is_empty():
     assert "inventory_discrepancy" in shelf_has_stock and "false_availability" not in shelf_has_stock
 
 
+def test_store_procurement_summary_is_sorted_by_received_qty_and_labelled_as_vendor_receipts():
+    result = data_agent.store_procurement_summary("ST002")
+    received = [row["received_qty"] for row in result.facts["ranking"]]
+    assert received == sorted(received, reverse=True)
+    assert len(received) <= config.PROCUREMENT_TOP_N
+    assert "received from vendors (not customer sales)" in result.summary_lines[0]
+    assert result.data_used == ["receipts.csv", "product_master.csv"]
+
+
+def test_store_procurement_summary_excludes_receipts_after_anchor(monkeypatch):
+    # The provided receipts end on the anchor day, so a fake table adds a row after it.
+    receipts = pd.DataFrame({"store_id": ["ST900", "ST900"], "sku": ["SKU1001", "SKU1002"],
+                             "po_qty": [10, 500], "received_qty": [8, 500],
+                             "receipt_date": [config.ANCHOR, config.ANCHOR + pd.Timedelta(days=1)]})
+    real_load_table = data_agent.load_table
+    monkeypatch.setattr(data_agent, "load_table",
+                        lambda name: receipts if name == "receipts" else real_load_table(name))
+    ranking = data_agent.store_procurement_summary("ST900").facts["ranking"]
+    assert [row["sku"] for row in ranking] == ["SKU1001"]
+    assert ranking[0]["name"] == "English Willow Cricket Bat"
+
+
+def test_unsupported_analytics_intent_returns_a_cannot_answer_result():
+    result = triage.triage(safety.check_input("Which items sold the most to customers at ST003?"), None, None)
+    assert (result.mode, result.analytics_intent) == ("analytics", "other")
+    data_results = data_agent.run_data_agent(result)
+    assert [data_result.findings for data_result in data_results] == [["unsupported_analytics"]]
+    assert data_results[0].data_used == []
+
+
 def test_safety_incident_only_for_a_specific_product():
     assert "safety_incident" not in data_agent.quality_complaints().findings   # all-products analytics scan
     assert "safety_incident" in data_agent.quality_complaints(mention="treadmill").findings
