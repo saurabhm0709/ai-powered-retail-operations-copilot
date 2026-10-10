@@ -398,7 +398,10 @@ def quality_complaints(sku: str | None = None, vendor_id: str | None = None, men
     findings = []
     if count >= config.REPEATED_COMPLAINTS_MIN or store_count >= config.REPEATED_COMPLAINTS_MIN:
         findings.append("repeated_quality_complaints")
-    if rows["text"].str.contains(SAFETY_ROW_PATTERN, case=False).any():
+    # Only for a specific product/vendor: one safety row somewhere in an all-products scan is not a live
+    # incident for this request (same reason as vendor_quality_ranking).
+    is_filtered = bool(sku or vendor_id or mention)
+    if is_filtered and rows["text"].str.contains(SAFETY_ROW_PATTERN, case=False).any():
         findings.append("safety_incident")
     scope = sku or vendor_id or (f"'{mention}'" if mention else "all products")
     facts = {"filter": scope, "days": days, "complaint_count": count, "store_count": store_count,

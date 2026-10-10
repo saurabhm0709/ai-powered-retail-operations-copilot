@@ -68,6 +68,8 @@ EXAMPLES (input -> key fields):
 # Analytics questions ask about many cases at once, not one live issue.
 ANALYTICS_PATTERN = r"\b(how many|which vendor|which store|grouped by|group by|show (all|unresolved|open)|list (all|open)" \
                     r"|top \d+|trend|summar(y|ise|ize))\b"
+# Asking what the policy says, with no live incident (01_retail_operations_sop.md#priority-rules: P4).
+POLICY_QUESTION_PATTERN = r"\b(what is|what's|what does) (our|the) (policy|rule|process)\b|\bpolicy (on|for)\b"
 
 # Checked in order; first match wins.
 ANALYTICS_INTENTS: list[tuple[AnalyticsIntent, str]] = [
@@ -144,7 +146,7 @@ def extract_receipt_present(text: str) -> bool | None:
 # Text -> impact scope (01_retail_operations_sop.md#priority-rules: one register vs many vs store-wide).
 def extract_scope(text: str) -> str:
     lowered = text.lower()
-    if re.search(r"\b(all|every) (the )?registers?\b|no register", lowered):
+    if re.search(r"\b(all|every) (the )?(registers?|tills?|counters?)\b|no register", lowered):
         return "all_registers"
     if re.search(r"store-?wide|whole store|entire store", lowered):
         return "one_store"
@@ -211,6 +213,8 @@ def extract_facts(text: str, store_hint: str | None) -> Facts:
 # Masked text -> (mode, analytics intent or None).
 def detect_mode(text: str) -> tuple[str, AnalyticsIntent | None]:
     lowered = text.lower()
+    if re.search(POLICY_QUESTION_PATTERN, lowered):
+        return "policy_question", None
     if not re.search(ANALYTICS_PATTERN, lowered):
         return "triage", None
     for intent, pattern in ANALYTICS_INTENTS:

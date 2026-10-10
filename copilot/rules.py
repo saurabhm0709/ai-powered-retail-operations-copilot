@@ -11,13 +11,14 @@ from copilot.schemas import Category, DataResult, Escalation, TriageResult
 CATEGORY_KEYWORDS: list[tuple[Category, str]] = [
     ("Product Quality and Safety", r"injur|recall|unsafe|hazard|defect|seam|split|crack|warp|torn|malfunction"
                                    r"|quality complaint|broke|hurt|belt slip"),
-    ("Pricing and Promotions", r"price|pricing|shelf label|promo|discount|offer|mrp|overcharg"),
-    ("POS and Payments", r"register|\breg\b|card ?reader|card payment|card machine|\bpos\b|payment|upi|terminal|swipe"),
-    ("Returns and Refunds", r"\breturn|refund|exchange"),
+    ("Pricing and Promotions", r"price|pricing|shelf (label|tag)|promo|discount|offer|mrp|overcharg|till charg"),
+    ("POS and Payments", r"register|\breg\b|\btills?\b|card ?reader|card payment|card machine|\bpos\b|payment|upi"
+                         r"|terminal|swipe"),
+    ("Returns and Refunds", r"\breturn|refund|exchange|money back"),
     ("Vendor and Supply Chain", r"short ship|shipment|received (less|fewer|only)|vendor|supplier|purchase order"
-                                r"|earlier order|order of \d+|\bpo\b"),
+                                r"|earlier order|order of \d+|\bpo\b|delivery|came in short|\d+ of \d+ arrived"),
     ("Inventory and Replenishment", r"out of stock|stock|not available|inventory|reorder|cycle count|replenish"
-                                    r"|system\b.{0,40}\bshelf|shelf count|on.?hand"),
+                                    r"|system\b.{0,40}\bshelf|shelf count|on.?hand|running low|few left"),
     ("Customer Service", r"complain|rude|waiting|service|loyalty|upset"),
 ]
 
