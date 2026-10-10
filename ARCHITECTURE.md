@@ -353,7 +353,7 @@ The LLM never writes pandas code; the dispatcher selects tools deterministically
 | Tool | Logic | Findings emitted |
 |---|---|---|
 | `resolve_sku(mention)` | see Triage step 3 | — |
-| `stock_status(store, sku)` | inventory row; `below_reorder = on_hand ≤ reorder_point`; `discrepancy = abs(system_qty−on_hand) > 10 or > 20% of max(system_qty,1)`; join product `high_demand` | `stockout`, `stockout_high_demand`, `below_reorder`, `inventory_discrepancy` |
+| `stock_status(store, sku)` | inventory row; `below_reorder = on_hand ≤ reorder_point`; `discrepancy = abs(system_qty−on_hand) > 10 or > 20% of max(system_qty,1)`; join product `high_demand` | `stockout`, `stockout_high_demand`, `below_reorder`, `inventory_discrepancy`, `false_availability` (on_hand 0, system_qty > 0) |
 | `receipt_history(store, sku, n=3)` | last n receipts by date ≤ anchor; `fill_pct = received/po`; short if < 0.90; `consecutive_short` if last 2 both short | `short_shipment`, `consecutive_short_shipment`, `receipt_quality_issue` (quality_check_ok == No and note not packaging-only) |
 | `warehouse_status(sku)` | WH001 inventory + WH001 receipts for sku | `warehouse_depleted` (WH001 on_hand == 0 or latest WH001 receipt received 0) |
 | `vendor_performance(vendor_id)` | fill_rate < 0.80 or on_time < 0.85 → "warning signal, not proof" | `vendor_warning` |
@@ -391,7 +391,7 @@ citation, matrix_trigger)`:
 | P2-PRICING-MULTI | P2 | Pricing and scope ∈ {many_skus, department, many_customers, multiple_stores} | 02#pricing-and-promotions | Department or multi-customer pricing mismatch |
 | P2-QUALITY-REPEATED | P2 | Quality and (repeated or multi_store or finding `repeated_quality_complaints`) | 04#product-quality-complaints | Repeated quality complaints without immediate safety risk |
 | P2-REFUND-APPROVAL | P2 | finding `refund_needs_approval` | 02#returns-and-refunds, 05#human-in-the-loop | No-receipt or high-value refund threshold |
-| P2-DISCREPANCY | P2 | `inventory_discrepancy` on high-demand item | 03#inventory-discrepancy | High-demand SKU stock-out or false availability |
+| P2-DISCREPANCY | P2 | `false_availability` (discrepancy with an empty shelf) on high-demand item | 03#inventory-discrepancy | High-demand SKU stock-out or false availability |
 | P3-POS-SINGLE | P3 | POS, one register | 02#pos-card-reader-runbook | One register or one card reader failing |
 | P3-PRICING-SINGLE | P3 | Pricing, single SKU/label | 02#pricing-and-promotions | Single SKU shelf-vs-register mismatch |
 | P3-INVENTORY-ROUTINE | P3 | below reorder / routine discrepancy | 03#inventory-discrepancy | Routine reorder or cycle count |

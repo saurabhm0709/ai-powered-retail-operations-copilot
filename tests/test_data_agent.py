@@ -135,3 +135,9 @@ def test_defect_mention_ignores_packaging_and_adds_quality_check_to_returns():
     assert result.facts.defect_mentioned is True
     tools = [data_result.tool for data_result in data_agent.run_data_agent(result)]
     assert tools == ["refund_check", "quality_complaints"]
+
+
+def test_false_availability_only_when_shelf_is_empty():
+    assert "false_availability" in data_agent.stock_findings(0, 4, 10, True)
+    shelf_has_stock = data_agent.stock_findings(12, 18, 15, True)
+    assert "inventory_discrepancy" in shelf_has_stock and "false_availability" not in shelf_has_stock

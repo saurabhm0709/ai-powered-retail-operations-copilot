@@ -10,12 +10,14 @@ from copilot.schemas import Category, DataResult, Escalation, TriageResult
 # immediate risk" (01_retail_operations_sop.md#service-categories): safety before pricing before POS, etc.
 CATEGORY_KEYWORDS: list[tuple[Category, str]] = [
     ("Product Quality and Safety", r"injur|recall|unsafe|hazard|defect|seam|split|crack|warp|torn|malfunction"
-                                   r"|quality complaint|broke"),
+                                   r"|quality complaint|broke|hurt|belt slip"),
     ("Pricing and Promotions", r"price|pricing|shelf label|promo|discount|offer|mrp|overcharg"),
-    ("POS and Payments", r"register|card reader|card payment|card machine|\bpos\b|payment|upi|terminal|swipe"),
+    ("POS and Payments", r"register|\breg\b|card ?reader|card payment|card machine|\bpos\b|payment|upi|terminal|swipe"),
     ("Returns and Refunds", r"\breturn|refund|exchange"),
-    ("Vendor and Supply Chain", r"short ship|shipment|received (less|fewer|only)|vendor|supplier|purchase order"),
-    ("Inventory and Replenishment", r"out of stock|stock|not available|inventory|reorder|cycle count|replenish"),
+    ("Vendor and Supply Chain", r"short ship|shipment|received (less|fewer|only)|vendor|supplier|purchase order"
+                                r"|earlier order|order of \d+|\bpo\b"),
+    ("Inventory and Replenishment", r"out of stock|stock|not available|inventory|reorder|cycle count|replenish"
+                                    r"|system\b.{0,40}\bshelf|shelf count|on.?hand"),
     ("Customer Service", r"complain|rude|waiting|service|loyalty|upset"),
 ]
 
@@ -112,7 +114,8 @@ PRIORITY_RULES = [
      "trigger": "No-receipt or high-value refund threshold",
      "reason": "The refund is above an approval threshold, so it needs manager approval (P2)."},
     {"id": "P2-DISCREPANCY", "priority": "P2",
-     "when": lambda t, f, hd: "inventory_discrepancy" in f and hd,
+     # 03_inventory_replenishment_policy.md#inventory-discrepancy: P2 only when it causes false availability.
+     "when": lambda t, f, hd: "false_availability" in f and hd,
      "citations": [f"{INV}#inventory-discrepancy"],
      "trigger": "High-demand SKU stock-out or false availability",
      "reason": "An inventory discrepancy on a high-demand item is P2."},

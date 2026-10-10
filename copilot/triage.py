@@ -150,7 +150,7 @@ def extract_scope(text: str) -> str:
         return "one_store"
     if re.search(r"\b(multiple|several|two|three|many) registers\b|registers \d+ and \d+", lowered):
         return "multiple_registers"
-    if re.search(r"\bregister\b", lowered):
+    if re.search(r"\b(register|reg)\b", lowered):
         return "one_register"
     if re.search(r"\b(two|multiple|several|many|all) stores\b", lowered):
         return "multiple_stores"

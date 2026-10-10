@@ -168,6 +168,9 @@ def stock_findings(on_hand: int, system_qty: int, reorder_point: int, high_deman
     gap = abs(system_qty - on_hand)
     if gap > config.DISCREPANCY_UNITS or gap > config.DISCREPANCY_PCT * max(system_qty, 1):
         findings.append("inventory_discrepancy")
+        # The system offers stock the shelf does not have: customers see false availability (#inventory-discrepancy).
+        if on_hand == 0 and system_qty > 0:
+            findings.append("false_availability")
     return findings
 
 
