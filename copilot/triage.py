@@ -117,6 +117,15 @@ def extract_time_window(text: str) -> int | None:
     return amount if match.group(2).lower() == "hour" else amount * 24
 
 
+# Damaged packaging alone is not a product defect (same exclusion as the quality complaint data).
+DEFECT_PATTERN = r"\b(damaged(?!\s+packaging)|defect\w*|broken|torn|crack\w*|split|seams?|faulty)"
+
+
+# Text -> True when the item itself is reported damaged or defective.
+def extract_defect_mentioned(text: str) -> bool:
+    return bool(re.search(DEFECT_PATTERN, text, re.IGNORECASE))
+
+
 # Text -> order context ("academy order" -> "academy"), "none" if absent.
 def extract_order_context(text: str) -> str:
     match = re.search(r"\b(academy|school|tournament|team)\b", text, re.IGNORECASE)
@@ -136,7 +145,7 @@ def extract_facts(text: str, store_hint: str | None) -> Facts:
         amount_inr=extract_amount(text), receipt_present=extract_receipt_present(text),
         safety_signal=extract_safety_signal(text), order_context=extract_order_context(text),
         repeated=bool(re.search(r"\b(again|repeated|repeatedly|keeps|multiple complaints)\b", text, re.IGNORECASE)),
-        multi_store=scope == "multiple_stores",
+        multi_store=scope == "multiple_stores", defect_mentioned=extract_defect_mentioned(text),
         time_window_hours=extract_time_window(text),
         priority_filter=extract_priority_filter(text), quoted_prices_inr=extract_all_amounts(text),
     )

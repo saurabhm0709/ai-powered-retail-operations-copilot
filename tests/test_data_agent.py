@@ -125,3 +125,13 @@ def test_dispatcher_returns_no_data_when_store_is_missing():
     assert result.facts.sku == "SKU1004"
     assert "store_id" in result.missing_fields
     assert data_agent.run_data_agent(result) == []
+
+
+def test_defect_mention_ignores_packaging_and_adds_quality_check_to_returns():
+    assert triage.extract_defect_mentioned("Box arrived with damaged packaging only.") is False
+    result = triage.triage(safety.check_input(
+        "Refund request at ST001 with receipt: the Exercise Bike arrived damaged, INR 17999."), None, None)
+    assert result.category == "Returns and Refunds"
+    assert result.facts.defect_mentioned is True
+    tools = [data_result.tool for data_result in data_agent.run_data_agent(result)]
+    assert tools == ["refund_check", "quality_complaints"]

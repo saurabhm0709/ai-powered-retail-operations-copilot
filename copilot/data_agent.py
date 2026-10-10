@@ -8,7 +8,7 @@ import pandas as pd
 
 from copilot import config
 from copilot.data_store import before_anchor, load_table, within_window
-from copilot.schemas import DataResult, TriageResult
+from copilot.schemas import DataResult, Facts, TriageResult
 
 MAX_SKU_CANDIDATES = 3
 # Words that do not identify a product: the store sells "sports goods", "Size 5" is a size, "set"/"pair" a quantity.
@@ -573,6 +573,17 @@ def run_analytics(triage: TriageResult) -> list[DataResult]:
     return []
 
 
+# Returns facts -> refund_check when the amount is known, plus quality_complaints when the item is
+# damaged/defective (02_pos_pricing_returns_policy.md#returns-and-refunds: link damaged returns to quality).
+def returns_tools(facts: Facts) -> list[DataResult]:
+    results = []
+    if facts.amount_inr is not None:
+        results.append(refund_check(facts.amount_inr, facts.receipt_present))
+    if facts.defect_mentioned and (facts.sku or facts.product_mention):
+        results.append(quality_complaints(sku=facts.sku, mention=None if facts.sku else facts.product_mention))
+    return results
+
+
 # Triage -> data tool results (ARCHITECTURE.md §6 [3B] dispatcher). Missing store/SKU -> no data;
 # Triage missing_fields then drives the follow-up question.
 def run_data_agent(triage: TriageResult) -> list[DataResult]:
@@ -585,8 +596,8 @@ def run_data_agent(triage: TriageResult) -> list[DataResult]:
         return [receipt_history(facts.store_id, facts.sku), vendor_performance(product_row(facts.sku)["vendor_id"])]
     if triage.category == "Product Quality and Safety" and (facts.sku or facts.product_mention):
         return [quality_complaints(sku=facts.sku, mention=None if facts.sku else facts.product_mention)]
-    if triage.category == "Returns and Refunds" and facts.amount_inr is not None:
-        return [refund_check(facts.amount_inr, facts.receipt_present)]
+    if triage.category == "Returns and Refunds":
+        return returns_tools(facts)
     if triage.category == "Pricing and Promotions" and facts.sku:
         return [price_lookup(facts.sku, facts.quoted_prices_inr)]
     return []
